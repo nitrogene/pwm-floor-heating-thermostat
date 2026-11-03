@@ -4,7 +4,7 @@ Thermostat prédictif basé sur le modèle physique du bâtiment et de la dalle 
 - Estimation du quota énergétique journalier à partir des déperditions (W/K) et de la météo.
 - Ordonnancement prioritaire des cycles longs en Heures Creuses nocturnes (Linky TIC / Off-Peak tariff).
 - Machine à états finis inviolable garantissant les sécurités compresseurs Danfoss (30m ON / 15m OFF).
-- Recalage d'état par la sonde d'ambiance intérieure sans intégrateur divergent.
+- Moteur prédictif à temps mort : calcul de pente filtrée dT/dt (°C/h) et projection à t + theta.
 - Mode simulation / Shadow Mode (dry_run: true) pour validation comparée sans pilotage physique.
 """
 
@@ -150,6 +150,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._hours_run_today = 0.0
         self._last_day_reset = dt_util.now().date()
 
+        # Moteur prédictif et historique de dérivée
+        self._temp_history: list[tuple[datetime, float]] = []
+        self._temp_derivative: float = 0.0
+        self._temp_projected: float = DEFAULT_TARGET_TEMP
+
         # Télémétrie et simulation
         self._simulated_heater_state = False
         self._decision_reason = "Model initializing"
@@ -174,6 +179,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._fsm_state = old_attrs.get("fsm_state", FSM_IDLE)
             self._cycles_today = old_attrs.get("compressor_cycles_today", 0)
             self._hours_run_today = old_attrs.get("heating_hours_done_today", 0.0)
+            if "temp_derivative_hourly" in old_attrs:
+                try:
+                    self._temp_derivative = float(old_attrs["temp_derivative_hourly"])
+                except (ValueError, TypeError):
+                    pass
 
         # Écouteurs de changement d'état
         self.async_on_remove(
@@ -267,6 +277,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "observed_heater": self._observed_heater,
             "fsm_state": self._fsm_state,
             "outdoor_temperature": self._outdoor_temp,
+            "dead_time_hours": self._dead_time,
+            "temp_derivative_hourly": round(self._temp_derivative, 3),
+            "temp_projected_ahead": round(self._temp_projected, 2),
             "heat_loss_factor_wk": self._heat_loss,
             "compressor_power_watts": self._power_watts,
             "energy_quota_24h_kwh": round(self._energy_needed_kwh, 2),
@@ -303,6 +316,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             return
         try:
             self._cur_temp = float(new_state.state)
+            self._update_trajectory_projection(dt_util.utcnow())
             self.async_write_ha_state()
         except ValueError:
             pass
@@ -335,12 +349,47 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 new_state.state,
             )
 
+    def _update_trajectory_projection(self, now: datetime) -> None:
+        """Calcule la pente filtrée dT/dt (°C/h) et projette la température à t + theta."""
+        if self._cur_temp is None:
+            return
+
+        self._temp_history.append((now, self._cur_temp))
+
+        # Élagage de la fenêtre glissante (60 minutes)
+        cutoff = now - timedelta(minutes=60)
+        self._temp_history = [(t, v) for t, v in self._temp_history if t >= cutoff]
+
+        # Régression linéaire sur la fenêtre si au moins 2 points espacés de 5 minutes
+        if len(self._temp_history) >= 2:
+            dt_span = (self._temp_history[-1][0] - self._temp_history[0][0]).total_seconds()
+            if dt_span >= 300:  # >= 5 minutes
+                t0 = self._temp_history[0][0]
+                t_hours = [(t - t0).total_seconds() / 3600.0 for t, _ in self._temp_history]
+                temps = [v for _, v in self._temp_history]
+
+                n = len(t_hours)
+                mean_t = sum(t_hours) / n
+                mean_temp = sum(temps) / n
+
+                denom = sum((t - mean_t) ** 2 for t in t_hours)
+                if denom > 1e-6:
+                    raw_slope = sum((t - mean_t) * (v - mean_temp) for t, v in zip(t_hours, temps)) / denom
+                    # Borne physique de pente [-3.0, +3.0] °C/h
+                    self._temp_derivative = max(-3.0, min(3.0, raw_slope))
+                else:
+                    self._temp_derivative = 0.0
+
+        # Trajectoire projetée à t + theta
+        self._temp_projected = self._cur_temp + (self._dead_time * self._temp_derivative)
+
     def _async_read_sensors(self) -> None:
         """Lecture synchronisée des états actuels."""
         st_in = self.hass.states.get(self._target_sensor)
         if st_in and st_in.state not in ["unknown", "unavailable"]:
             try:
                 self._cur_temp = float(st_in.state)
+                self._update_trajectory_projection(dt_util.utcnow())
             except ValueError:
                 pass
 
@@ -373,7 +422,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._fsm_state == FSM_WAITING_MIN_OFF and elapsed >= self._min_off_duration.total_seconds():
             self._fsm_state = FSM_IDLE
 
-        # 1. Calcul du Quota d'Énergie Thermique requis (kWh sur 24h)
+        # 1. Mise à jour de la projection de trajectoire
+        self._update_trajectory_projection(now_utc)
+
+        # 2. Calcul du Quota d'Énergie Thermique requis (kWh sur 24h)
         if self._outdoor_temp is not None:
             delta_t = max(0.0, self._target_temp - self._outdoor_temp)
             # Déperditions journalières en kWh = (H * delta_t * 24h) / 1000
@@ -381,43 +433,50 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             # Heures de fonctionnement compresseur nécessaires sur 24h
             self._hours_needed_24h = (self._energy_needed_kwh * 1000.0) / self._power_watts
 
-        # 2. Heures Creuses / Off-peak actives ?
+        # 3. Heures Creuses / Off-peak actives ?
         off_peak_active = False
         if self._off_peak_sensor:
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
-        # 3. Stratégie d'ordonnancement prédictif
+        # 4. Stratégie d'ordonnancement prédictif par modèle
         should_heat = False
 
         if self._cur_temp is not None and self._outdoor_temp is not None:
             error = self._target_temp - self._cur_temp
+            projected_error = self._target_temp - self._temp_projected
 
             # Règle A : Priorité absolue à la charge nocturne en Heures Creuses / Off-Peak
             if off_peak_active:
                 if error >= -0.5 and self._outdoor_temp <= 12.0:
                     should_heat = True
                     self._decision_reason = (
-                        f"Off-peak thermal precharge (outdoor: {self._outdoor_temp}°C, delta: {round(error, 2)}°C)"
+                        f"Off-peak thermal precharge (ext: {self._outdoor_temp}°C, "
+                        f"curr: {self._cur_temp}°C, proj: {round(self._temp_projected, 2)}°C in {self._dead_time}h)"
                     )
-            # Règle B : En Heures Pleines / Peak, on chauffe uniquement si la dalle se décharge
+            # Règle B : En Heures Pleines / Peak, allumage anticipé si la trajectoire décroche
             else:
-                if error > 0.2:
+                if projected_error > 0.15 or error > 0.2:
                     should_heat = True
                     self._decision_reason = (
-                        f"Daytime comfort recovery heating (ambient deficit: {round(error, 2)}°C below target)"
+                        f"Anticipated thermal drop: projected {round(self._temp_projected, 2)}°C in {self._dead_time}h "
+                        f"(slope: {round(self._temp_derivative, 3)}°C/h, below target {self._target_temp}°C)"
                     )
 
-            # Règle C : Garde-fou absolu contre la surchauffe (+0.6°C au-dessus de consigne)
-            if error < -0.6:
+            # Règle C : Garde-fou absolu contre la surchauffe (+0.6°C réel ou projection > consigne + 0.8°C)
+            if error < -0.6 or (projected_error < -0.8 and self._cur_temp >= self._target_temp):
                 should_heat = False
                 self._decision_reason = (
-                    f"High temperature safety cutoff (+{round(-error, 2)}°C above target)"
+                    f"Overshoot prevention cutoff: curr {self._cur_temp}°C, "
+                    f"projected {round(self._temp_projected, 2)}°C (target: {self._target_temp}°C)"
                 )
             elif not should_heat:
-                self._decision_reason = "Idle (thermal equilibrium or setpoint satisfied)"
+                self._decision_reason = (
+                    f"Idle (stable trajectory: curr {self._cur_temp}°C, "
+                    f"projected {round(self._temp_projected, 2)}°C in {self._dead_time}h)"
+                )
 
-        # 4. Exécution sous contrainte stricte de la FSM
+        # 5. Exécution sous contrainte stricte de la FSM
         if should_heat:
             await self._async_start_heating_safe()
         else:

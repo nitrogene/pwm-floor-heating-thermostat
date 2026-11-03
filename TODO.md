@@ -6,9 +6,11 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
 
 ## 1. Moteur & Modélisation Thermodynamique
 
-- [ ] **Projection de trajectoire avec temps mort ($\theta$) :**
-  - [ ] Calculer la température projetée : $T_{\text{proj}}(t + \theta) = T_{\text{amb}}(t) + \theta \cdot \frac{dT_{\text{amb}}}{dt}$.
-  - [ ] Détecter la rupture de pente (creux thermique matinal) $\theta$ heures à l'avance pour déclencher l'allumage avant que l'ambiance ne passe sous la consigne minimale.
+- [x] **Projection de trajectoire avec temps mort ($\theta$) :**
+  - [x] Calculer la pente filtrée $dT/dt$ (°C/h) par régression linéaire robuste sur fenêtre glissante (60 min).
+  - [x] Calculer la température projetée : $T_{\text{proj}}(t + \theta) = T_{\text{amb}}(t) + \theta \cdot \frac{dT_{\text{amb}}}{dt}$.
+  - [x] Détecter la rupture de pente (creux thermique matinal) $\theta$ heures à l'avance pour déclencher l'allumage avant que l'ambiance ne passe sous la consigne minimale.
+  - [x] Exposition des attributs télémétriques `temp_derivative_hourly` et `temp_projected_ahead`.
 - [ ] **Modélisation des apports et pertes dynamiques :**
   - [ ] Intégration du vent (sur-déperditions convectives sur l'enveloppe).
   - [ ] Intégration du rayonnement solaire (capteur de luminosité ou prévision météo d'ensoleillement W/m²) pour inhiber les relances matinales inutiles les jours ensoleillés.
