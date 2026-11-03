@@ -4,16 +4,40 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/nitrogene/pwm-floor-heating-thermostat?include_prereleases)](https://github.com/nitrogene/pwm-floor-heating-thermostat/releases)
 
-A predictive, thermodynamic underfloor heating thermostat for Home Assistant, engineered specifically for high thermal inertia heavy slabs (chape liquide / dalle béton) and on/off (TOR) heating devices (geothermal or aerothermal heat pumps, thermal wax actuators, pellet boilers).
+A predictive, thermodynamic underfloor heating thermostat for Home Assistant, engineered specifically for high thermal inertia heavy slabs (*chape liquide / dalle béton*) and on/off (TOR / *Tout-Ou-Rien*) heating devices: geothermal heat pumps, electrothermal wax actuators, and pellet boilers.
 
 ---
 
-## Why this integration?
+## Targeted Heating Systems & Architectures
 
-Standard PID thermostats (such as `smart_thermostat`) fail on heavy underfloor heating systems:
-1. **Dead Time ($\theta \approx 2\text{h}$ to $3\text{h}$)**: Heat takes hours to diffuse through 7 cm of screed. During this time, the error persists, the integral term saturates (*integral windup*), forcing the heater to run too long and causing massive overshoots (+1.5°C to +2.5°C).
-2. **Compressor Short-Cycling**: PID algorithms frequently oscillate around the setpoint, turning on/off compressors within minutes—severely damaging scroll/piston compressors (Danfoss, Copeland) without guaranteed oil return and pressure equalization.
-3. **No Tariff Optimization**: Conventional thermostats heat reactively whenever temperature drops, missing the opportunity to store cheap calories in the slab during Off-Peak hours (Heures Creuses).
+This integration is purpose-built to solve the acute regulation challenges of **heavy inertia floor heating** powered by **fixed-speed on/off (TOR) actuators**:
+
+### 1. Direct-Expansion & Hydronic Geothermal Systems (Enalsa, Sofath, France Géothermie...)
+* **Compressors**: Danfoss (Maneurop M26DX, MT series), Copeland Scroll, Tecumseh.
+* **Mechanical & Refrigerant Constraints**:
+  * **Mandatory Oil Return ($\ge 30\text{ min}$ ON)**: Unlike inverter heat pumps, fixed-speed scroll or hermetic reciprocating compressors eject lubrication oil into the refrigeration circuits during operation. In direct-expansion floor loops (hundreds of meters of copper tubing embedded in concrete), it takes **at least 20 to 30 minutes of continuous flow** for the oil to migrate back to the compressor crankcase. Stopping prematurely causes progressive oil starvation and catastrophic mechanical seizure.
+  * **Pressure Equalization ($\ge 15\text{ min}$ OFF)**: After compressor shutdown, High Pressure (HP) and Low Pressure (BP) sides must fully balance before restarting. Starting against a residual differential pressure causes severe motor stall, capacitor degradation, or thermal breaker trips.
+  * **Cycle Budget ($\le 6\text{ cycles/day}$)**: Eliminating mechanical fatigue by substituting erratic micro-starts with long, consolidated heat charges.
+
+### 2. Heavy Screed Dalles & High Thermal Inertia
+* Designed for 5 to 8 cm screeds (*chape fluide anhydrite, chape ciment, dalle béton armé*).
+* Characterized by a **pure dead time of 2 to 3 hours** ($\theta$) before heat reaches the room surface, and a **thermal dissipation time constant of 12 to 20 hours** ($\tau$).
+
+### 3. Hydronic Underfloor Manifolds (Electrothermal Wax Actuators)
+* 230V or 24V Normally Closed (NC) / Normally Open (NO) thermal actuators on distribution manifolds.
+* These actuators feature a slow wax-expansion response (3 to 5 minutes to fully open/close), which naturally pairs with this thermostat's slow-cycle PWM modulation (1 to 3 hours PWM periods).
+
+### 4. Pellet Boilers & Thermal Buffer Tanks (*Ballons Tampons*)
+* Heating systems where short cycling creates incomplete combustion, soot accumulation, and excessive ignition resistance wear.
+
+---
+
+## Why standard PID thermostats fail on heavy slabs
+
+Standard PID thermostats (such as `smart_thermostat`) are ill-adapted for heavy underfloor heating:
+1. **Dead Time ($\theta \approx 2\text{h}$ to $3\text{h}$)**: Heat takes hours to diffuse through the slab. During this time, the error persists, the integral term saturates (*integral windup*), forcing the heater to run too long and causing massive overshoots (+1.5°C to +2.5°C).
+2. **Destructive Compressor Short-Cycling**: PID algorithms frequently oscillate around the setpoint, turning on/off compressors within minutes—severely damaging Danfoss compressors without guaranteed oil return and pressure equalization.
+3. **No Tariff Optimization**: Conventional thermostats heat reactively whenever ambient temperature drops, missing the opportunity to store cheap calories in the slab during Off-Peak hours (*Heures Creuses*).
 
 **`pwm_floor_heating_thermostat` solves all three issues by combining physical building modeling, slow PWM duty-cycle allocation, and a hardware-grade Finite State Machine (FSM).**
 
@@ -27,7 +51,8 @@ Standard PID thermostats (such as `smart_thermostat`) fail on heavy underfloor h
   - Minimum ON cycle: 30 minutes (ensures complete oil return).
   - Minimum OFF cycle: 15 minutes (ensures refrigerant pressure equalization).
   - Daily cycle budget limit (e.g. maximum 6 cycles/day).
-- ⚡ **Dynamic Off-Peak (Heures Creuses) Scheduling**: Prioritizes running long charging cycles when electricity is cheapest (Linky TIC / sensor integration).
+- ⚡ **Dynamic Off-Peak (*Heures Creuses*) Scheduling**: Prioritizes running long charging cycles when electricity is cheapest (Linky TIC / sensor integration).
+- 🔍 **AI Auto-Tuning & Telemetry**: Exposes model error $e_{\text{model}}$, trajectory projections, energy quota, passive cooling rates, and FSM diagnostics for automated calibration via AI agents or analytics.
 - 🔄 **Restart-Resilient**: Inherits `RestoreEntity`—restores running state, elapsed timers, and cycle counts after Home Assistant reboots.
 
 ---
@@ -62,13 +87,13 @@ climate:
     
     # Building thermal characteristics
     heat_loss_wk: 60.0          # Thermal loss rate (W/K)
-    power_watts: 6500.0         # Useful heat output (W)
+    power_watts: 6500.0         # Useful heat output (W) - e.g. 2x Danfoss M26DX
     slab_tau_hours: 15.0        # Slab thermal time constant (hours)
     dead_time_hours: 2.25       # Dead time for heat wave diffusion (hours)
     
-    # Mechanical compressor protections
-    min_cycle_duration: "00:30:00"      # Minimum ON time (30 min)
-    min_off_cycle_duration: "00:15:00"  # Minimum OFF time (15 min)
+    # Mechanical compressor protections (Danfoss specifications)
+    min_cycle_duration: "00:30:00"      # Minimum ON time (30 min for oil return)
+    min_off_cycle_duration: "00:15:00"  # Minimum OFF time (15 min for pressure balance)
     max_cycles_per_day: 6
     
     # Setpoints
