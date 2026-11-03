@@ -40,7 +40,27 @@ Standard PID thermostats (such as `smart_thermostat`) are ill-adapted for heavy 
 2. **Destructive Compressor Short-Cycling**: PID algorithms frequently oscillate around the setpoint, turning on/off compressors within minutes—severely damaging Danfoss compressors without guaranteed oil return and pressure equalization.
 3. **No Tariff Optimization**: Conventional thermostats heat reactively whenever ambient temperature drops, missing the opportunity to store cheap calories in the slab during Off-Peak hours (*Heures Creuses*).
 
-**`pwm_floor_heating_thermostat` solves all three issues by combining physical building modeling, slow PWM duty-cycle allocation, and a hardware-grade Finite State Machine (FSM).**
+---
+
+## Beyond the Heating Curve (*Loi d'Eau*): Predictive Time-Modulated Quotas
+
+Traditional hydronic heating systems rely on a **Heating Curve (*Loi d'eau*)**, which calculates the supply water temperature dynamically from instantaneous outdoor temperature:
+$$T_{\text{water\_supply}} = T_{\text{setpoint}} + \text{Slope} \times (T_{\text{setpoint}} - T_{\text{outdoor}})$$
+
+### Why the classical Heating Curve fails on fixed-speed & heavy slab systems:
+1. **Compressors cannot modulate flow temperature**: Fixed-speed scroll or hermetic reciprocating compressors (Danfoss, Copeland) run at **100% capacity or 0%**. In direct-expansion systems, condensing refrigerant enters the slab at a constant thermodynamic condensing temperature ($\approx 35^\circ\text{C}$ to $40^\circ\text{C}$). Flow temperature modulation is physically impossible.
+2. **Phase Lag & The Morning Cold Dip**: When a winter night freeze occurs at 04:00 AM, a reactive heating curve responds at 04:00 AM. But with a $\theta = 2.25\text{ h}$ dead time, heat only emerges into the living space around 06:30 or 07:00 AM—resulting in the infamous morning temperature drop.
+3. **Blindness to Tariff Opportunities**: A heating curve forces heating whenever outdoor temperature is cold, regardless of peak electricity pricing.
+
+### The Solution: From Water Temperature Modulation to Time Modulation (PWM)
+Instead of varying supply temperature, **`pwm_floor_heating_thermostat` modulates the compressor operating time over a 24-hour horizon**:
+$$E_{\text{daily\_quota}} (\text{kWh}) = \frac{H \cdot (T_{\text{setpoint}} - \bar{T}_{\text{outdoor, 24h}}) \cdot 24\text{ h}}{1000}$$
+$$\text{Compressor Hours Required} = \frac{E_{\text{daily\_quota}} \cdot 1000}{P_{\text{thermal}} (\text{W})}$$
+
+### Role of `outdoor_sensor` / `outdoor_temperature_forecast`
+The slab acts as a physical low-pass thermal filter. The outdoor temperature that the slab "sees" as it delivers a heat pulse is not the instantaneous reading at minute $t$, but the thermal profile over the traversal window:
+* **Option A: Forecast Sliding Window ($H_0 \rightarrow H+4$) [Recommended]**: Providing an outdoor temperature sensor averaged over the next 4 hours (e.g. from Météo-France or a weather integration) mirrors the exact heat loss profile the building will undergo while the injected heat wave travels through the screed.
+* **Option B: Real-Time Instantaneous Sensor**: If no forecast sensor is available, a standard outdoor probe works natively, with the model estimating the daily budget from continuous readings.
 
 ---
 
