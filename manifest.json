@@ -1,0 +1,13 @@
+{
+  "domain": "pwm_floor_heating_thermostat",
+  "name": "PWM Floor Heating Thermostat",
+  "codeowners": ["@nitrogene"],
+  "config_flow": false,
+  "dependencies": [],
+  "documentation": "https://github.com/nitrogene/pwm-floor-heating-thermostat",
+  "integration_type": "entity",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/nitrogene/pwm-floor-heating-thermostat/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
