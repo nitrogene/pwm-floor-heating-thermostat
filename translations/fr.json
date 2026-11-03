@@ -1,0 +1,61 @@
+{
+  "entity": {
+    "climate": {
+      "pwm_floor_heating_thermostat": {
+        "state_attributes": {
+          "fsm_state": {
+            "name": "État FSM"
+          },
+          "temp_projected_ahead": {
+            "name": "Température projetée"
+          },
+          "temp_derivative_hourly": {
+            "name": "Pente horaire de température"
+          },
+          "dead_time_hours": {
+            "name": "Temps mort de dalle"
+          },
+          "energy_quota_24h_kwh": {
+            "name": "Quota d'énergie 24h"
+          },
+          "heating_hours_needed_24h": {
+            "name": "Heures de chauffe requises"
+          },
+          "heating_hours_done_today": {
+            "name": "Heures de chauffe effectuées"
+          },
+          "compressor_cycles_today": {
+            "name": "Cycles compresseur aujourd'hui"
+          },
+          "min_cycle_lock_remaining_sec": {
+            "name": "Temps restant marche minimale"
+          },
+          "min_off_lock_remaining_sec": {
+            "name": "Temps restant égalisation pression"
+          },
+          "dry_run": {
+            "name": "Mode simulation"
+          },
+          "simulated_heater_state": {
+            "name": "État simulé de chauffe"
+          },
+          "decision_reason": {
+            "name": "Motif de décision"
+          },
+          "floor_temperature": {
+            "name": "Température dalle / eau"
+          },
+          "max_floor_temperature": {
+            "name": "Plafond max dalle"
+          },
+          "min_floor_temperature": {
+            "name": "Seuil hors-gel dalle"
+          },
+          "off_peak_active": {
+            "name": "Heures Creuses actives"
+          }
+        }
+      }
+    }
+  }
+}

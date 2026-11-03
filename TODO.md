@@ -79,10 +79,13 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
 - [x] **Compatibilité HACS :**
   - [x] `hacs.json` configuré avec `"content_in_root": true`.
   - [x] Structure de distribution autonome et documentation `README.md`.
-- [ ] **Validation CI/CD (GitHub Actions) :**
-  - [ ] Workflow de validation `hassfest` (Home Assistant Manifest Validator).
-  - [ ] Workflow de contrôle de style et typage (`ruff`, `flake8`, `mypy`).
-  - [ ] Tests unitaires automatisés (`pytest-homeassistant-custom-component`) pour valider la FSM et les transitions d'états.
+- [x] **Validation CI/CD (GitHub Actions) :**
+  - [x] Workflow de validation `hassfest` (Home Assistant Manifest Validator).
+  - [x] Workflow de validation `hacs` (HACS Action).
+  - [x] Workflow de contrôle de style et typage (`ruff check`).
+  - [x] Tests unitaires automatisés (`pytest`) validant la FSM Danfoss, la régression linéaire et les sécurités DTU 65.14.
+- [x] **Traductions et métadonnées d'entités :**
+  - [x] Fichier racine `strings.json`.
+  - [x] Traductions complètes en anglais (`translations/en.json`) et en français (`translations/fr.json`).
 - [ ] **Config Flow (Interface UI Home Assistant) :**
   - [ ] Implémenter `config_flow.py` pour permettre l'ajout du thermostat directement depuis l'interface graphique de Home Assistant (sans YAML obligatoire).
-  - [ ] Support des traductions (`strings.json`, `fr.json`, `en.json`).

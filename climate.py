@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-import voluptuous as vol
 
+import voluptuous as vol
 from homeassistant.components.climate import (
     PLATFORM_SCHEMA,
     ClimateEntity,
@@ -63,16 +63,13 @@ from .const import (
     DEFAULT_HEAT_LOSS,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
-    DEFAULT_MAX_TEMP,
     DEFAULT_MIN_CYCLE,
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_MIN_OFF,
-    DEFAULT_MIN_TEMP,
     DEFAULT_NAME,
     DEFAULT_POWER_WATTS,
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_TARGET_TEMP,
-    DOMAIN,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
     FSM_RUNNING_NORMAL,
@@ -411,7 +408,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
                 denom = sum((t - mean_t) ** 2 for t in t_hours)
                 if denom > 1e-6:
-                    raw_slope = sum((t - mean_t) * (v - mean_temp) for t, v in zip(t_hours, temps)) / denom
+                    raw_slope = (
+                        sum((t - mean_t) * (v - mean_temp) for t, v in zip(t_hours, temps, strict=True)) / denom
+                    )
                     # Borne physique de pente [-3.0, +3.0] °C/h
                     self._temp_derivative = max(-3.0, min(3.0, raw_slope))
                 else:

@@ -1,6 +1,7 @@
 """Intégration PWM Floor Heating Thermostat pour Home Assistant."""
 
 import logging
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 

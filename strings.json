@@ -1,0 +1,61 @@
+{
+  "entity": {
+    "climate": {
+      "pwm_floor_heating_thermostat": {
+        "state_attributes": {
+          "fsm_state": {
+            "name": "FSM State"
+          },
+          "temp_projected_ahead": {
+            "name": "Projected Temperature"
+          },
+          "temp_derivative_hourly": {
+            "name": "Hourly Temperature Slope"
+          },
+          "dead_time_hours": {
+            "name": "Slab Dead Time"
+          },
+          "energy_quota_24h_kwh": {
+            "name": "24h Energy Quota"
+          },
+          "heating_hours_needed_24h": {
+            "name": "Daily Heating Hours Needed"
+          },
+          "heating_hours_done_today": {
+            "name": "Heating Hours Today"
+          },
+          "compressor_cycles_today": {
+            "name": "Compressor Cycles Today"
+          },
+          "min_cycle_lock_remaining_sec": {
+            "name": "Minimum Run Remaining"
+          },
+          "min_off_lock_remaining_sec": {
+            "name": "Pressure Equalization Remaining"
+          },
+          "dry_run": {
+            "name": "Simulation Dry-Run"
+          },
+          "simulated_heater_state": {
+            "name": "Simulated Heater State"
+          },
+          "decision_reason": {
+            "name": "Decision Reason"
+          },
+          "floor_temperature": {
+            "name": "Floor / Water Temperature"
+          },
+          "max_floor_temperature": {
+            "name": "Max Floor Temperature Limit"
+          },
+          "min_floor_temperature": {
+            "name": "Min Floor Temperature Limit"
+          },
+          "off_peak_active": {
+            "name": "Off-Peak Tariff Active"
+          }
+        }
+      }
+    }
+  }
+}
