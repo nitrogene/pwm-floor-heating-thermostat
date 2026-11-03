@@ -5,6 +5,7 @@ Thermostat prédictif basé sur le modèle physique du bâtiment et de la dalle 
 - Ordonnancement prioritaire des cycles longs en Heures Creuses nocturnes (Linky TIC).
 - Machine à états finis inviolable garantissant les sécurités compresseurs Danfoss (30m ON / 15m OFF).
 - Recalage d'état par la sonde d'ambiance intérieure sans intégrateur divergent.
+- Mode simulation / Shadow Mode (dry_run: true) pour validation comparée sans pilotage physique.
 """
 
 from __future__ import annotations
@@ -40,17 +41,20 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DEAD_TIME,
+    CONF_DRY_RUN,
     CONF_HEAT_LOSS,
     CONF_HEATER,
     CONF_HEURES_CREUSES_SENSOR,
     CONF_MAX_CYCLES_PER_DAY,
     CONF_MIN_CYCLE_DURATION,
     CONF_MIN_OFF_CYCLE_DURATION,
+    CONF_OBSERVED_HEATER,
     CONF_OUTDOOR_SENSOR,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
     CONF_TARGET_SENSOR,
     DEFAULT_DEAD_TIME_HOURS,
+    DEFAULT_DRY_RUN,
     DEFAULT_HEAT_LOSS,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_TEMP,
@@ -72,10 +76,12 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
-        vol.Required(CONF_HEATER): cv.entity_id,
+        vol.Optional(CONF_HEATER): cv.entity_id,
         vol.Required(CONF_TARGET_SENSOR): cv.entity_id,
         vol.Required(CONF_OUTDOOR_SENSOR): cv.entity_id,
         vol.Optional(CONF_HEURES_CREUSES_SENSOR): cv.entity_id,
+        vol.Optional(CONF_DRY_RUN, default=DEFAULT_DRY_RUN): cv.boolean,
+        vol.Optional(CONF_OBSERVED_HEATER): cv.entity_id,
         vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
         vol.Optional(CONF_HEAT_LOSS, default=DEFAULT_HEAT_LOSS): vol.Coerce(float),
         vol.Optional(CONF_POWER_WATTS, default=DEFAULT_POWER_WATTS): vol.Coerce(float),
@@ -93,11 +99,11 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
-    """Configuration de la plateforme Thermal Slab Thermostat."""
-    async_add_entities([ThermalSlabThermostat(hass, config)])
+    """Configuration de la plateforme PWM Floor Heating Thermostat."""
+    async_add_entities([PwmFloorHeatingThermostat(hass, config)])
 
 
-class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
+class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     """Représentation du thermostat prédictif à dalle thermique."""
 
     _attr_precision = PRECISION_TENTHS
@@ -109,10 +115,12 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
         """Initialisation de l'entité."""
         self.hass = hass
         self._name = config[CONF_NAME]
-        self._heater_entity = config[CONF_HEATER]
+        self._heater_entity = config.get(CONF_HEATER)
         self._target_sensor = config[CONF_TARGET_SENSOR]
         self._outdoor_sensor = config[CONF_OUTDOOR_SENSOR]
         self._hc_sensor = config.get(CONF_HEURES_CREUSES_SENSOR)
+        self._dry_run = config[CONF_DRY_RUN]
+        self._observed_heater = config.get(CONF_OBSERVED_HEATER)
 
         # Paramètres thermodynamiques
         self._heat_loss = config[CONF_HEAT_LOSS]
@@ -120,43 +128,52 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
         self._slab_tau = config[CONF_SLAB_TIME_CONSTANT]
         self._dead_time = config[CONF_DEAD_TIME]
 
-        # Sécurités mécaniques Danfoss
-        self._min_cycle_duration: timedelta = config[CONF_MIN_CYCLE_DURATION]
-        self._min_off_duration: timedelta = config[CONF_MIN_OFF_CYCLE_DURATION]
-        self._max_cycles_per_day: int = config[CONF_MAX_CYCLES_PER_DAY]
+        # Sécurités Danfoss
+        self._min_cycle_duration = config[CONF_MIN_CYCLE_DURATION]
+        self._min_off_duration = config[CONF_MIN_OFF_CYCLE_DURATION]
+        self._max_cycles = config[CONF_MAX_CYCLES_PER_DAY]
 
-        # États internes
-        self._target_temp: float = DEFAULT_TARGET_TEMP
+        # État courant
         self._cur_temp: float | None = None
         self._outdoor_temp: float | None = None
-        self._hvac_mode: HVACMode = HVACMode.HEAT
-        self._hvac_action: HVACAction = HVACAction.IDLE
+        self._target_temp: float = DEFAULT_TARGET_TEMP
+        self._hvac_mode = HVACMode.HEAT
+        self._hvac_action = HVACAction.IDLE
 
         # Machine à états finis (FSM)
-        self._fsm_state: str = FSM_IDLE
-        self._last_state_change: datetime = dt_util.utcnow()
+        self._fsm_state = FSM_IDLE
+        self._last_state_change = dt_util.utcnow()
         self._cycle_start_time: datetime | None = None
+        self._cycles_today = 0
+        self._hours_run_today = 0.0
+        self._last_day_reset = dt_util.now().date()
 
-        # Télémétrie et suivi d'énergie
-        self._energy_needed_kwh: float = 0.0
-        self._hours_needed_24h: float = 0.0
-        self._hours_run_today: float = 0.0
-        self._cycles_today: int = 0
-        self._last_day_reset: datetime.date = dt_util.now().date()
+        # Télémétrie et simulation
+        self._simulated_heater_state = False
+        self._decision_reason = "Initialisation du modèle"
+        self._energy_needed_kwh = 0.0
+        self._hours_needed_24h = 0.0
 
     async def async_added_to_hass(self) -> None:
         """Enregistrement des écouteurs d'événements et restauration d'état."""
         await super().async_added_to_hass()
 
-        # Restauration de la consigne précédente si disponible
-        old_state = await self.async_get_last_state()
-        if old_state is not None:
-            if old_state.attributes.get(ATTR_TEMPERATURE) is not None:
-                self._target_temp = float(old_state.attributes[ATTR_TEMPERATURE])
+        # Restauration de l'état précédent
+        if old_state := await self.async_get_last_state():
+            if old_target := old_state.attributes.get(ATTR_TEMPERATURE):
+                try:
+                    self._target_temp = float(old_target)
+                except ValueError:
+                    pass
             if old_state.state in [HVACMode.HEAT, HVACMode.OFF]:
                 self._hvac_mode = HVACMode(old_state.state)
 
-        # Écouteurs de changement de température
+            old_attrs = old_state.attributes
+            self._fsm_state = old_attrs.get("fsm_state", FSM_IDLE)
+            self._cycles_today = old_attrs.get("compressor_cycles_today", 0)
+            self._hours_run_today = old_attrs.get("heating_hours_done_today", 0.0)
+
+        # Écouteurs de changement d'état
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass, [self._target_sensor], self._async_target_sensor_changed
@@ -170,19 +187,34 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
         if self._hc_sensor:
             self.async_on_remove(
                 async_track_state_change_event(
-                    self.hass, [self._hc_sensor], self._async_hc_changed
+                    self.hass, [self._hc_sensor], self._async_hc_sensor_changed
                 )
             )
 
-        # Boucle périodique d'évaluation thermique (toutes les 5 minutes)
+        if self._observed_heater:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._observed_heater], self._async_observed_heater_changed
+                )
+            )
+
+        # Boucle d'évaluation périodique (toutes les minutes)
         self.async_on_remove(
             async_track_time_interval(
-                self.hass, self._async_control_heating, timedelta(minutes=5)
+                self.hass, self._async_control_heating, timedelta(minutes=1)
             )
         )
 
-        # Initialisation immédiate des valeurs de capteurs
-        self._async_read_sensors()
+        @callback
+        def _async_startup(*_) -> None:
+            """Synchronisation initiale une fois Home Assistant complètement démarré."""
+            self._async_read_sensors()
+            self.hass.async_create_task(self._async_control_heating())
+
+        if self.hass.is_running:
+            _async_startup()
+        else:
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, _async_startup)
 
     @property
     def name(self) -> str:
@@ -191,11 +223,11 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
 
     @property
     def current_temperature(self) -> float | None:
-        """Température ambiante courante."""
+        """Température ambiante mesurée."""
         return self._cur_temp
 
     @property
-    def target_temperature(self) -> float:
+    def target_temperature(self) -> float | None:
         """Consigne de température."""
         return self._target_temp
 
@@ -206,26 +238,14 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
 
     @property
     def hvac_action(self) -> HVACAction:
-        """Action thermique en cours."""
+        """Action thermodynamique en cours."""
         return self._hvac_action
 
     @property
-    def min_temp(self) -> float:
-        """Température minimale sélectionnable."""
-        return DEFAULT_MIN_TEMP
-
-    @property
-    def max_temp(self) -> float:
-        """Température maximale sélectionnable."""
-        return DEFAULT_MAX_TEMP
-
-    @property
-    def extra_state_attributes(self) -> dict[str, any]:
-        """Attributs télémétriques et thermodynamiques enrichis."""
+    def extra_state_attributes(self) -> dict:
+        """Attributs télémétriques pour diagnostic et calage IA."""
         now = dt_util.utcnow()
         elapsed = (now - self._last_state_change).total_seconds()
-
-        # Calcul des décomptes de sécurité Danfoss
         min_on_rem = 0
         min_off_rem = 0
         if self._fsm_state == FSM_RUNNING_MIN_LOCK:
@@ -239,6 +259,10 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
             hc_active = hc_st is not None and hc_st.state == "on"
 
         return {
+            "dry_run": self._dry_run,
+            "simulated_heater_state": self._simulated_heater_state,
+            "decision_reason": self._decision_reason,
+            "observed_heater": self._observed_heater,
             "fsm_state": self._fsm_state,
             "outdoor_temperature": self._outdoor_temp,
             "heat_loss_factor_wk": self._heat_loss,
@@ -293,9 +317,20 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
             pass
 
     @callback
-    def _async_hc_changed(self, event) -> None:
-        """Bascule Heures Creuses / Heures Pleines."""
-        self.hass.async_create_task(self._async_control_heating())
+    def _async_hc_sensor_changed(self, event) -> None:
+        """Mise à jour de l'état des Heures Creuses (Linky TIC)."""
+        self.async_write_ha_state()
+
+    @callback
+    def _async_observed_heater_changed(self, event) -> None:
+        """Écoute passive du vrai relais en mode Shadow / Digital Twin."""
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            _LOGGER.debug(
+                "[SHADOW OBSERVER] Observed heater %s changed to %s",
+                self._observed_heater,
+                new_state.state,
+            )
 
     def _async_read_sensors(self) -> None:
         """Lecture synchronisée des états actuels."""
@@ -353,23 +388,31 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
         should_heat = False
 
         if self._cur_temp is not None and self._outdoor_temp is not None:
-            # Superviseur d'ambiance doux (sans windup)
             error = self._target_temp - self._cur_temp
 
             # Règle A : Priorité absolue à la charge nocturne en Heures Creuses
             if hc_active:
-                # En HC, tant qu'il y a du froid dehors et qu'on ne dépasse pas consigne + 0.5°C : on précharge la dalle
                 if error >= -0.5 and self._outdoor_temp <= 12.0:
                     should_heat = True
-
-            # Règle B : En Heures Pleines, on chauffe uniquement si la dalle se décharge et que la consigne baisse
+                    self._decision_reason = (
+                        f"Précharge nocturne Heures Creuses (ext: {self._outdoor_temp}°C, delta: {round(error, 2)}°C)"
+                    )
+            # Règle B : En Heures Pleines, on chauffe uniquement si la dalle se décharge
             else:
                 if error > 0.2:
                     should_heat = True
+                    self._decision_reason = (
+                        f"Chauffe diurne compensatoire (creux d'ambiance: {round(error, 2)}°C sous consigne)"
+                    )
 
-            # Règle C : Garde-fou absolu contre la surchauffe (arrêt forcé dès +0.6°C au-dessus de consigne)
+            # Règle C : Garde-fou absolu contre la surchauffe (+0.6°C au-dessus de consigne)
             if error < -0.6:
                 should_heat = False
+                self._decision_reason = (
+                    f"Arrêt sécurité surchauffe (+{round(-error, 2)}°C au-dessus consigne)"
+                )
+            elif not should_heat:
+                self._decision_reason = "En veille (équilibre thermique atteint ou consigne satisfaite)"
 
         # 4. Exécution sous contrainte stricte de la FSM
         if should_heat:
@@ -384,7 +427,6 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
         now = dt_util.utcnow()
 
         if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
-            # Déjà en marche
             return
 
         if self._fsm_state == FSM_WAITING_MIN_OFF:
@@ -396,11 +438,27 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
                 )
                 return
 
-        # Démarrage effectif
-        _LOGGER.info("Démarrage compresseur : %s", self._heater_entity)
-        await self.hass.services.async_call(
-            "switch", "turn_on", {"entity_id": self._heater_entity}, blocking=True
-        )
+        # Démarrage effectif ou simulé
+        self._simulated_heater_state = True
+        if self._dry_run:
+            _LOGGER.info(
+                "[DRY-RUN / SHADOW MODE] Démarrage simulé compresseur %s (Raison: %s)",
+                self._name,
+                self._decision_reason,
+            )
+            # Si un helper input_boolean est configuré comme heater témoin, on le bascule pour visualisation
+            if self._heater_entity and self._heater_entity.startswith("input_boolean."):
+                await self.hass.services.async_call(
+                    "input_boolean", "turn_on", {"entity_id": self._heater_entity}, blocking=False
+                )
+        else:
+            if self._heater_entity:
+                domain = self._heater_entity.split(".")[0]
+                _LOGGER.info("Démarrage physique compresseur : %s", self._heater_entity)
+                await self.hass.services.async_call(
+                    domain, "turn_on", {"entity_id": self._heater_entity}, blocking=True
+                )
+
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
@@ -412,7 +470,6 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
         now = dt_util.utcnow()
 
         if self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]:
-            # Déjà à l'arrêt
             return
 
         if self._fsm_state == FSM_RUNNING_MIN_LOCK:
@@ -424,11 +481,25 @@ class ThermalSlabThermostat(ClimateEntity, RestoreEntity):
                 )
                 return
 
-        # Arrêt effectif
-        _LOGGER.info("Arrêt compresseur : %s", self._heater_entity)
-        await self.hass.services.async_call(
-            "switch", "turn_off", {"entity_id": self._heater_entity}, blocking=True
-        )
+        # Arrêt effectif ou simulé
+        self._simulated_heater_state = False
+        if self._dry_run:
+            _LOGGER.info(
+                "[DRY-RUN / SHADOW MODE] Arrêt simulé compresseur %s (Raison: %s)",
+                self._name,
+                self._decision_reason,
+            )
+            if self._heater_entity and self._heater_entity.startswith("input_boolean."):
+                await self.hass.services.async_call(
+                    "input_boolean", "turn_off", {"entity_id": self._heater_entity}, blocking=False
+                )
+        else:
+            if self._heater_entity:
+                domain = self._heater_entity.split(".")[0]
+                _LOGGER.info("Arrêt physique compresseur : %s", self._heater_entity)
+                await self.hass.services.async_call(
+                    domain, "turn_off", {"entity_id": self._heater_entity}, blocking=True
+                )
 
         if self._cycle_start_time:
             run_sec = (now - self._cycle_start_time).total_seconds()

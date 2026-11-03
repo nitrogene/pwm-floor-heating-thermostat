@@ -10,6 +10,10 @@ CONF_TARGET_SENSOR = "target_sensor"
 CONF_OUTDOOR_SENSOR = "outdoor_sensor"
 CONF_HEURES_CREUSES_SENSOR = "heures_creuses_sensor"
 
+# Mode simulation / Shadow mode
+CONF_DRY_RUN = "dry_run"
+CONF_OBSERVED_HEATER = "observed_heater"
+
 # Paramètres physiques du modèle thermodynamique
 CONF_HEAT_LOSS = "heat_loss_wk"          # Déperditions thermiques globales de la pièce (W/K)
 CONF_POWER_WATTS = "power_watts"        # Puissance thermique utile du/des compresseurs (W)
@@ -26,6 +30,7 @@ DEFAULT_NAME = "PWM Floor Heating Thermostat"
 DEFAULT_TARGET_TEMP = 19.0
 DEFAULT_MIN_TEMP = 16.0
 DEFAULT_MAX_TEMP = 26.0
+DEFAULT_DRY_RUN = False
 
 DEFAULT_HEAT_LOSS = 60.0               # ~60 W/K pour salon moyen
 DEFAULT_POWER_WATTS = 6500.0           # 2 compresseurs Danfoss M26DX (~6.5 kW th)

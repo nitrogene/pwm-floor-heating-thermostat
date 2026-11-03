@@ -21,12 +21,17 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
 
 ---
 
-## 2. Ordonnancement Énergétique & Machine à États Finis (FSM)
+## 2. Ordonnancement Énergétique, FSM & Modes de Fonctionnement
 
 - [x] **Machine à états finis Danfoss (Garde matérielle) :**
   - [x] Minimum ON cycle : 30 minutes (retour d'huile obligatoire dans le carter).
   - [x] Minimum OFF cycle : 15 minutes (égalisation des pressions frigorifiques BP/HP).
   - [x] Budget maximal de cycles journaliers (anti-fatigue mécanique, max 6 cycles/jour).
+- [x] **Shadow Mode & Dry-Run (Simulation Passive Jumeau Numérique) :**
+  - [x] Option `dry_run: true` garantissant qu'aucun ordre physique n'est envoyé aux actionneurs.
+  - [x] Support d'un actionneur virtuel (`input_boolean.*`) pour visualiser l'état simulé en direct dans l'UI.
+  - [x] Paramètre `observed_heater` pour écouter et comparer les activations du vrai thermostat PID en parallèle.
+  - [x] Attributs d'explicabilité : `simulated_heater_state`, `decision_reason` et `dry_run`.
 - [ ] **Optimisation tarifaire Heures Creuses (Linky TIC) :**
   - [ ] Allocation prioritaire du quota thermique journalier pendant les Heures Creuses nocturnes.
   - [ ] Modulation de la durée des cycles PWM (ex: cycles de 2h30 en HC vs cycles de 45 min en HP si besoin impérieux).
