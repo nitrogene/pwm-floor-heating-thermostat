@@ -8,7 +8,8 @@ DOMAIN = "pwm_floor_heating_thermostat"
 CONF_HEATER = "heater"
 CONF_TARGET_SENSOR = "target_sensor"
 CONF_OUTDOOR_SENSOR = "outdoor_sensor"
-CONF_HEURES_CREUSES_SENSOR = "heures_creuses_sensor"
+CONF_OFF_PEAK_SENSOR = "off_peak_sensor"
+CONF_HEURES_CREUSES_SENSOR = "heures_creuses_sensor"  # Alias pour rétro-compatibilité
 
 # Mode simulation / Shadow mode
 CONF_DRY_RUN = "dry_run"

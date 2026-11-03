@@ -51,7 +51,7 @@ Standard PID thermostats (such as `smart_thermostat`) are ill-adapted for heavy 
   - Minimum ON cycle: 30 minutes (ensures complete oil return).
   - Minimum OFF cycle: 15 minutes (ensures refrigerant pressure equalization).
   - Daily cycle budget limit (e.g. maximum 6 cycles/day).
-- ⚡ **Dynamic Off-Peak (*Heures Creuses*) Scheduling**: Prioritizes running long charging cycles when electricity is cheapest (Linky TIC / sensor integration).
+- ⚡ **Dynamic Off-Peak (*Heures Creuses*) Scheduling**: Prioritizes running long charging cycles when electricity is cheapest (Linky TIC / dynamic sensor integration).
 - 👻 **Shadow Mode / Digital Twin (Dry-Run)**: Run in parallel with an existing legacy thermostat without actuating physical relays to compare theoretical decisions against real curves before live switchover.
 - 🔍 **AI Auto-Tuning & Telemetry**: Exposes model error $e_{\text{model}}$, trajectory projections, energy quota, passive cooling rates, and FSM diagnostics for automated calibration via AI agents or analytics.
 - 🔄 **Restart-Resilient**: Inherits `RestoreEntity`—restores running state, elapsed timers, and cycle counts after Home Assistant reboots.
@@ -80,11 +80,11 @@ Copy all files into `<home_assistant_config>/custom_components/pwm_floor_heating
 ```yaml
 climate:
   - platform: pwm_floor_heating_thermostat
-    name: "Salon Geothermie"
-    heater: switch.relais_compresseurs_salon
-    target_sensor: sensor.temperature_salon
-    outdoor_sensor: sensor.temperature_exterieure_meteo
-    heures_creuses_sensor: binary_sensor.heures_creuses_nuit
+    name: "Living Room Geothermal"
+    heater: switch.living_room_compressor_relay
+    target_sensor: sensor.living_room_temperature
+    outdoor_sensor: sensor.outdoor_temperature_forecast
+    off_peak_sensor: binary_sensor.off_peak_electricity_tariff # Optional: French Linky TIC or energy tariff
     
     # Building thermal characteristics
     heat_loss_wk: 60.0          # Thermal loss rate (W/K)
@@ -110,21 +110,24 @@ Run safely alongside an existing PID or manual thermostat. The model will calcul
 ```yaml
 climate:
   - platform: pwm_floor_heating_thermostat
-    name: "Salon Simulation Shadow"
-    target_sensor: sensor.temperature_salon
-    outdoor_sensor: sensor.temperature_exterieure_meteo
-    heures_creuses_sensor: binary_sensor.heures_creuses_nuit
+    name: "Living Room Simulation Shadow"
+    target_sensor: sensor.living_room_temperature
+    outdoor_sensor: sensor.outdoor_temperature_forecast
+    off_peak_sensor: binary_sensor.off_peak_electricity_tariff
     
     # Shadow mode configuration
-    dry_run: true                                  # No physical relay switching!
-    heater: input_boolean.simulation_relais_salon  # Optional virtual helper to visualize simulated state
-    observed_heater: switch.relais_compresseurs_salon # Observe what the current PID is actually doing
+    dry_run: true                                          # Disables physical relay switching!
+    heater: input_boolean.living_room_simulated_relay      # Optional: virtual helper to visualize simulated state
+    observed_heater: switch.living_room_compressor_relay   # Observe what the existing PID is currently doing
     
     heat_loss_wk: 60.0
     power_watts: 6500.0
     slab_tau_hours: 15.0
     dead_time_hours: 2.25
 ```
+
+> [!NOTE]
+> **French Linky TIC users:** For backward compatibility, `heures_creuses_sensor` can be used as a direct alias for `off_peak_sensor` (e.g. `heures_creuses_sensor: binary_sensor.heures_creuses_nuit`).
 
 ---
 

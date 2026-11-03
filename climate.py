@@ -2,7 +2,7 @@
 
 Thermostat prédictif basé sur le modèle physique du bâtiment et de la dalle :
 - Estimation du quota énergétique journalier à partir des déperditions (W/K) et de la météo.
-- Ordonnancement prioritaire des cycles longs en Heures Creuses nocturnes (Linky TIC).
+- Ordonnancement prioritaire des cycles longs en Heures Creuses nocturnes (Linky TIC / Off-Peak tariff).
 - Machine à états finis inviolable garantissant les sécurités compresseurs Danfoss (30m ON / 15m OFF).
 - Recalage d'état par la sonde d'ambiance intérieure sans intégrateur divergent.
 - Mode simulation / Shadow Mode (dry_run: true) pour validation comparée sans pilotage physique.
@@ -49,6 +49,7 @@ from .const import (
     CONF_MIN_CYCLE_DURATION,
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
+    CONF_OFF_PEAK_SENSOR,
     CONF_OUTDOOR_SENSOR,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
@@ -79,6 +80,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_HEATER): cv.entity_id,
         vol.Required(CONF_TARGET_SENSOR): cv.entity_id,
         vol.Required(CONF_OUTDOOR_SENSOR): cv.entity_id,
+        vol.Optional(CONF_OFF_PEAK_SENSOR): cv.entity_id,
         vol.Optional(CONF_HEURES_CREUSES_SENSOR): cv.entity_id,
         vol.Optional(CONF_DRY_RUN, default=DEFAULT_DRY_RUN): cv.boolean,
         vol.Optional(CONF_OBSERVED_HEATER): cv.entity_id,
@@ -118,7 +120,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._heater_entity = config.get(CONF_HEATER)
         self._target_sensor = config[CONF_TARGET_SENSOR]
         self._outdoor_sensor = config[CONF_OUTDOOR_SENSOR]
-        self._hc_sensor = config.get(CONF_HEURES_CREUSES_SENSOR)
+        self._off_peak_sensor = config.get(CONF_OFF_PEAK_SENSOR) or config.get(CONF_HEURES_CREUSES_SENSOR)
         self._dry_run = config[CONF_DRY_RUN]
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
 
@@ -150,7 +152,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         # Télémétrie et simulation
         self._simulated_heater_state = False
-        self._decision_reason = "Initialisation du modèle"
+        self._decision_reason = "Model initializing"
         self._energy_needed_kwh = 0.0
         self._hours_needed_24h = 0.0
 
@@ -184,10 +186,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self.hass, [self._outdoor_sensor], self._async_outdoor_sensor_changed
             )
         )
-        if self._hc_sensor:
+        if self._off_peak_sensor:
             self.async_on_remove(
                 async_track_state_change_event(
-                    self.hass, [self._hc_sensor], self._async_hc_sensor_changed
+                    self.hass, [self._off_peak_sensor], self._async_off_peak_sensor_changed
                 )
             )
 
@@ -253,10 +255,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         elif self._fsm_state == FSM_WAITING_MIN_OFF:
             min_off_rem = max(0, int(self._min_off_duration.total_seconds() - elapsed))
 
-        hc_active = False
-        if self._hc_sensor:
-            hc_st = self.hass.states.get(self._hc_sensor)
-            hc_active = hc_st is not None and hc_st.state == "on"
+        off_peak_active = False
+        if self._off_peak_sensor:
+            st = self.hass.states.get(self._off_peak_sensor)
+            off_peak_active = st is not None and st.state == "on"
 
         return {
             "dry_run": self._dry_run,
@@ -273,7 +275,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "compressor_cycles_today": self._cycles_today,
             "min_cycle_lock_remaining_sec": min_on_rem,
             "min_off_lock_remaining_sec": min_off_rem,
-            "heures_creuses_active": hc_active,
+            "off_peak_active": off_peak_active,
+            "heures_creuses_active": off_peak_active,
         }
 
     async def async_set_temperature(self, **kwargs) -> None:
@@ -317,8 +320,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             pass
 
     @callback
-    def _async_hc_sensor_changed(self, event) -> None:
-        """Mise à jour de l'état des Heures Creuses (Linky TIC)."""
+    def _async_off_peak_sensor_changed(self, event) -> None:
+        """Mise à jour de l'état des Heures Creuses / Off-peak tariff."""
         self.async_write_ha_state()
 
     @callback
@@ -378,11 +381,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             # Heures de fonctionnement compresseur nécessaires sur 24h
             self._hours_needed_24h = (self._energy_needed_kwh * 1000.0) / self._power_watts
 
-        # 2. Heures Creuses actives ?
-        hc_active = False
-        if self._hc_sensor:
-            st = self.hass.states.get(self._hc_sensor)
-            hc_active = st is not None and st.state == "on"
+        # 2. Heures Creuses / Off-peak actives ?
+        off_peak_active = False
+        if self._off_peak_sensor:
+            st = self.hass.states.get(self._off_peak_sensor)
+            off_peak_active = st is not None and st.state == "on"
 
         # 3. Stratégie d'ordonnancement prédictif
         should_heat = False
@@ -390,29 +393,29 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._cur_temp is not None and self._outdoor_temp is not None:
             error = self._target_temp - self._cur_temp
 
-            # Règle A : Priorité absolue à la charge nocturne en Heures Creuses
-            if hc_active:
+            # Règle A : Priorité absolue à la charge nocturne en Heures Creuses / Off-Peak
+            if off_peak_active:
                 if error >= -0.5 and self._outdoor_temp <= 12.0:
                     should_heat = True
                     self._decision_reason = (
-                        f"Précharge nocturne Heures Creuses (ext: {self._outdoor_temp}°C, delta: {round(error, 2)}°C)"
+                        f"Off-peak thermal precharge (outdoor: {self._outdoor_temp}°C, delta: {round(error, 2)}°C)"
                     )
-            # Règle B : En Heures Pleines, on chauffe uniquement si la dalle se décharge
+            # Règle B : En Heures Pleines / Peak, on chauffe uniquement si la dalle se décharge
             else:
                 if error > 0.2:
                     should_heat = True
                     self._decision_reason = (
-                        f"Chauffe diurne compensatoire (creux d'ambiance: {round(error, 2)}°C sous consigne)"
+                        f"Daytime comfort recovery heating (ambient deficit: {round(error, 2)}°C below target)"
                     )
 
             # Règle C : Garde-fou absolu contre la surchauffe (+0.6°C au-dessus de consigne)
             if error < -0.6:
                 should_heat = False
                 self._decision_reason = (
-                    f"Arrêt sécurité surchauffe (+{round(-error, 2)}°C au-dessus consigne)"
+                    f"High temperature safety cutoff (+{round(-error, 2)}°C above target)"
                 )
             elif not should_heat:
-                self._decision_reason = "En veille (équilibre thermique atteint ou consigne satisfaite)"
+                self._decision_reason = "Idle (thermal equilibrium or setpoint satisfied)"
 
         # 4. Exécution sous contrainte stricte de la FSM
         if should_heat:
@@ -446,7 +449,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._name,
                 self._decision_reason,
             )
-            # Si un helper input_boolean est configuré comme heater témoin, on le bascule pour visualisation
             if self._heater_entity and self._heater_entity.startswith("input_boolean."):
                 await self.hass.services.async_call(
                     "input_boolean", "turn_on", {"entity_id": self._heater_entity}, blocking=False
