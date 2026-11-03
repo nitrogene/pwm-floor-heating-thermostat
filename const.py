@@ -11,6 +11,11 @@ CONF_OUTDOOR_SENSOR = "outdoor_sensor"
 CONF_OFF_PEAK_SENSOR = "off_peak_sensor"
 CONF_HEURES_CREUSES_SENSOR = "heures_creuses_sensor"  # Alias pour rétro-compatibilité
 
+# Sonde de dalle / boucle d'eau (plancher hydraulique)
+CONF_FLOOR_TEMP_SENSOR = "floor_temp_sensor"
+CONF_MAX_FLOOR_TEMP = "max_floor_temp"
+CONF_MIN_FLOOR_TEMP = "min_floor_temp"
+
 # Mode simulation / Shadow mode
 CONF_DRY_RUN = "dry_run"
 CONF_OBSERVED_HEATER = "observed_heater"
@@ -32,6 +37,9 @@ DEFAULT_TARGET_TEMP = 19.0
 DEFAULT_MIN_TEMP = 16.0
 DEFAULT_MAX_TEMP = 26.0
 DEFAULT_DRY_RUN = False
+
+DEFAULT_MAX_FLOOR_TEMP = 28.0          # Norme DTU 65.14 confort pieds nus
+DEFAULT_MIN_FLOOR_TEMP = 14.0          # Hors-gel plancher
 
 DEFAULT_HEAT_LOSS = 60.0               # ~60 W/K pour salon moyen
 DEFAULT_POWER_WATTS = 6500.0           # 2 compresseurs Danfoss M26DX (~6.5 kW th)

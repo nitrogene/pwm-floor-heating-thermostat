@@ -5,6 +5,7 @@ Thermostat prédictif basé sur le modèle physique du bâtiment et de la dalle 
 - Ordonnancement prioritaire des cycles longs en Heures Creuses nocturnes (Linky TIC / Off-Peak tariff).
 - Machine à états finis inviolable garantissant les sécurités compresseurs Danfoss (30m ON / 15m OFF).
 - Moteur prédictif à temps mort : calcul de pente filtrée dT/dt (°C/h) et projection à t + theta.
+- Support des sondes de boucle d'eau / dalle (planchers hydrauliques) avec garde-fou DTU 65.14.
 - Mode simulation / Shadow Mode (dry_run: true) pour validation comparée sans pilotage physique.
 """
 
@@ -42,11 +43,14 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
+    CONF_FLOOR_TEMP_SENSOR,
     CONF_HEAT_LOSS,
     CONF_HEATER,
     CONF_HEURES_CREUSES_SENSOR,
     CONF_MAX_CYCLES_PER_DAY,
+    CONF_MAX_FLOOR_TEMP,
     CONF_MIN_CYCLE_DURATION,
+    CONF_MIN_FLOOR_TEMP,
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
@@ -58,8 +62,10 @@ from .const import (
     DEFAULT_DRY_RUN,
     DEFAULT_HEAT_LOSS,
     DEFAULT_MAX_CYCLES,
+    DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MAX_TEMP,
     DEFAULT_MIN_CYCLE,
+    DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_MIN_OFF,
     DEFAULT_MIN_TEMP,
     DEFAULT_NAME,
@@ -82,6 +88,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Required(CONF_OUTDOOR_SENSOR): cv.entity_id,
         vol.Optional(CONF_OFF_PEAK_SENSOR): cv.entity_id,
         vol.Optional(CONF_HEURES_CREUSES_SENSOR): cv.entity_id,
+        vol.Optional(CONF_FLOOR_TEMP_SENSOR): cv.entity_id,
+        vol.Optional(CONF_MAX_FLOOR_TEMP, default=DEFAULT_MAX_FLOOR_TEMP): vol.Coerce(float),
+        vol.Optional(CONF_MIN_FLOOR_TEMP, default=DEFAULT_MIN_FLOOR_TEMP): vol.Coerce(float),
         vol.Optional(CONF_DRY_RUN, default=DEFAULT_DRY_RUN): cv.boolean,
         vol.Optional(CONF_OBSERVED_HEATER): cv.entity_id,
         vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
@@ -123,6 +132,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._off_peak_sensor = config.get(CONF_OFF_PEAK_SENSOR) or config.get(CONF_HEURES_CREUSES_SENSOR)
         self._dry_run = config[CONF_DRY_RUN]
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
+
+        # Sonde de dalle / boucle d'eau (hydraulique)
+        self._floor_temp_sensor = config.get(CONF_FLOOR_TEMP_SENSOR)
+        self._max_floor_temp = config[CONF_MAX_FLOOR_TEMP]
+        self._min_floor_temp = config[CONF_MIN_FLOOR_TEMP]
+        self._floor_temp: float | None = None
 
         # Paramètres thermodynamiques
         self._heat_loss = config[CONF_HEAT_LOSS]
@@ -203,6 +218,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self._floor_temp_sensor:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._floor_temp_sensor], self._async_floor_temp_changed
+                )
+            )
+
         if self._observed_heater:
             self.async_on_remove(
                 async_track_state_change_event(
@@ -277,6 +299,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "observed_heater": self._observed_heater,
             "fsm_state": self._fsm_state,
             "outdoor_temperature": self._outdoor_temp,
+            "floor_temperature": self._floor_temp,
+            "max_floor_temperature": self._max_floor_temp if self._floor_temp_sensor else None,
+            "min_floor_temperature": self._min_floor_temp if self._floor_temp_sensor else None,
             "dead_time_hours": self._dead_time,
             "temp_derivative_hourly": round(self._temp_derivative, 3),
             "temp_projected_ahead": round(self._temp_projected, 2),
@@ -339,6 +364,18 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self.async_write_ha_state()
 
     @callback
+    def _async_floor_temp_changed(self, event) -> None:
+        """Mise à jour de la sonde de dalle / boucle d'eau."""
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in ["unknown", "unavailable"]:
+            return
+        try:
+            self._floor_temp = float(new_state.state)
+            self.async_write_ha_state()
+        except ValueError:
+            pass
+
+    @callback
     def _async_observed_heater_changed(self, event) -> None:
         """Écoute passive du vrai relais en mode Shadow / Digital Twin."""
         new_state = event.data.get("new_state")
@@ -399,6 +436,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._outdoor_temp = float(st_out.state)
             except ValueError:
                 pass
+
+        if self._floor_temp_sensor:
+            st_floor = self.hass.states.get(self._floor_temp_sensor)
+            if st_floor and st_floor.state not in ["unknown", "unavailable"]:
+                try:
+                    self._floor_temp = float(st_floor.state)
+                except ValueError:
+                    pass
 
     async def _async_control_heating(self, now: datetime | None = None) -> None:
         """Cœur algorithmique : Bilan thermodynamique et commande par modèle."""
@@ -463,7 +508,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                         f"(slope: {round(self._temp_derivative, 3)}°C/h, below target {self._target_temp}°C)"
                     )
 
-            # Règle C : Garde-fou absolu contre la surchauffe (+0.6°C réel ou projection > consigne + 0.8°C)
+            # Règle C : Garde-fou de surface et ambiance (+0.6°C réel ou projection > consigne + 0.8°C)
             if error < -0.6 or (projected_error < -0.8 and self._cur_temp >= self._target_temp):
                 should_heat = False
                 self._decision_reason = (
@@ -476,7 +521,22 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"projected {round(self._temp_projected, 2)}°C in {self._dead_time}h)"
                 )
 
-        # 5. Exécution sous contrainte stricte de la FSM
+        # 5. Garde-fous plancher chauffant / boucle d'eau (si capteur configuré)
+        if self._floor_temp is not None:
+            if self._floor_temp >= self._max_floor_temp:
+                should_heat = False
+                self._decision_reason = (
+                    f"Floor protection cutoff: water temp {self._floor_temp}°C "
+                    f"exceeds slab maximum {self._max_floor_temp}°C (DTU 65.14)"
+                )
+            elif self._floor_temp <= self._min_floor_temp:
+                should_heat = True
+                self._decision_reason = (
+                    f"Floor freeze protection: water temp {self._floor_temp}°C "
+                    f"below floor minimum {self._min_floor_temp}°C"
+                )
+
+        # 6. Exécution sous contrainte stricte de la FSM
         if should_heat:
             await self._async_start_heating_safe()
         else:

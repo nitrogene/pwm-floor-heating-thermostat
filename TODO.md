@@ -34,6 +34,11 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
   - [x] Support d'un actionneur virtuel (`input_boolean.*`) pour visualiser l'état simulé en direct dans l'UI.
   - [x] Paramètre `observed_heater` pour écouter et comparer les activations du vrai thermostat PID en parallèle.
   - [x] Attributs d'explicabilité : `simulated_heater_state`, `decision_reason` et `dry_run`.
+- [x] **Planchers chauffants hydrauliques & Sonde de boucle d'eau :**
+  - [x] Support optionnel du paramètre `floor_temp_sensor` (mesure directe de l'eau de retour de boucle).
+  - [x] Coupure d'urgence anti-surchauffe dalle `max_floor_temp` (défaut 28.0°C conforme à la norme DTU 65.14).
+  - [x] Protection hors-gel plancher `min_floor_temp` (défaut 14.0°C).
+  - [x] Attributs télémétriques `floor_temperature`, `max_floor_temperature`, `min_floor_temperature`.
 - [ ] **Optimisation tarifaire Heures Creuses (Linky TIC) :**
   - [ ] Allocation prioritaire du quota thermique journalier pendant les Heures Creuses nocturnes.
   - [ ] Modulation de la durée des cycles PWM (ex: cycles de 2h30 en HC vs cycles de 45 min en HP si besoin impérieux).
