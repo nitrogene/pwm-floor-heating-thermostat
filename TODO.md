@@ -36,7 +36,33 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
 
 ---
 
-## 3. Qualité Logicielle, Tests & Écosystème HACS
+## 3. Télémétrie Avancée & Données de Debug pour Calage IA (Auto-Tuning)
+
+- [ ] **Métrique reine d'erreur de modèle ($e_{\text{modèle}}$) :**
+  - [ ] Historiser $e_{\text{modèle}}(t) = T_{\text{mesurée}}(t) - T_{\text{projetée}}(t - \theta)$ pour permettre aux agents IA de quantifier immédiatement l'erreur d'estimation des déperditions $H$ ou le déphasage de $\theta$.
+- [ ] **Exposition des variables internes du modèle physique :**
+  - [ ] `temp_projected_ahead` : Température anticipée à $t + \theta$ (°C).
+  - [ ] `temp_derivative_hourly` : Dérivée filtrée de température $dT/dt$ (°C/h).
+  - [ ] `estimated_slab_energy_kwh` : Énergie thermique estimée emmagasinée dans la dalle (kWh).
+  - [ ] `daily_energy_quota_kwh` : Quota thermique requis calculé sur 24h selon prévisions météo.
+  - [ ] `energy_delivered_today_kwh` : Énergie thermique utile injectée depuis minuit.
+  - [ ] `duty_cycle_continuous` : Rapport cyclique PWM théorique demandé (0 à 100%).
+- [ ] **Relevé automatique des pentes d'identification (Données d'apprentissage) :**
+  - [ ] `unheated_cooling_rate` : Taux de refroidissement passif (°C/h) identifiant $H / C_{\text{dalle}}$.
+  - [ ] `active_heating_rate` : Taux de montée active en chauffe (°C/h) identifiant $P_{\text{watts}} / C_{\text{dalle}}$.
+  - [ ] `outdoor_delta_avg` : $\Delta T_{\text{int-ext}}$ moyen associé.
+- [ ] **Instrumentation FSM & Diagnostic :**
+  - [ ] `fsm_state` (`idle`, `running_min_lock`, `running_normal`, `waiting_min_off`).
+  - [ ] `current_cycle_elapsed_min` et `current_cycle_target_min`.
+  - [ ] `cycles_count_today` et `max_cycles_budget`.
+  - [ ] `time_to_next_allowed_start` (décompte d'égalisation de pression 15 min).
+- [ ] **Architecture d'exposition Home Assistant :**
+  - [ ] Présence de l'intégralité des indicateurs dans les `extra_state_attributes` de l'entité Climate.
+  - [ ] Support d'une option `debug: true` instanciant automatiquement les entités de diagnostic `sensor.<nom>_*` dédiées (historisation native SQLite / InfluxDB sans template externe).
+
+---
+
+## 4. Qualité Logicielle, Tests & Écosystème HACS
 
 - [x] **Compatibilité HACS :**
   - [x] `hacs.json` configuré avec `"content_in_root": true`.
