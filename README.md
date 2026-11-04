@@ -15,13 +15,13 @@ This integration is purpose-built to solve the acute regulation challenges of **
 ### 1. Direct-Expansion & Hydronic Geothermal Systems (Enalsa, Sofath, France Géothermie...)
 * **Compressors**: Danfoss (Maneurop M26DX, MT series), Copeland Scroll, Tecumseh.
 * **Mechanical & Refrigerant Constraints**:
-  * **Mandatory Oil Return ($\ge 30\text{ min}$ ON)**: Unlike inverter heat pumps, fixed-speed scroll or hermetic reciprocating compressors eject lubrication oil into the refrigeration circuits during operation. In direct-expansion floor loops (hundreds of meters of copper tubing embedded in concrete), it takes **at least 20 to 30 minutes of continuous flow** for the oil to migrate back to the compressor crankcase. Stopping prematurely causes progressive oil starvation and catastrophic mechanical seizure.
-  * **Pressure Equalization ($\ge 15\text{ min}$ OFF)**: After compressor shutdown, High Pressure (HP) and Low Pressure (BP) sides must fully balance before restarting. Starting against a residual differential pressure causes severe motor stall, capacitor degradation, or thermal breaker trips.
-  * **Cycle Budget ($\le 6\text{ cycles/day}$)**: Eliminating mechanical fatigue by substituting erratic micro-starts with long, consolidated heat charges.
+  * **Mandatory Oil Return (>= 30 min ON)**: Unlike inverter heat pumps, fixed-speed scroll or hermetic reciprocating compressors eject lubrication oil into the refrigeration circuits during operation. In direct-expansion floor loops (hundreds of meters of copper tubing embedded in concrete), it takes **at least 20 to 30 minutes of continuous flow** for the oil to migrate back to the compressor crankcase. Stopping prematurely causes progressive oil starvation and catastrophic mechanical seizure.
+  * **Pressure Equalization (>= 15 min OFF)**: After compressor shutdown, High Pressure (HP) and Low Pressure (BP) sides must fully balance before restarting. Starting against a residual differential pressure causes severe motor stall, capacitor degradation, or thermal breaker trips.
+  * **Cycle Budget (<= 6 cycles/day)**: Eliminating mechanical fatigue by substituting erratic micro-starts with long, consolidated heat charges.
 
 ### 2. Heavy Screed Dalles & High Thermal Inertia
 * Designed for 5 to 8 cm screeds (*chape fluide anhydrite, chape ciment, dalle béton armé*).
-* Characterized by a **pure dead time of 2 to 3 hours** ($\theta$) before heat reaches the room surface, and a **thermal dissipation time constant of 12 to 20 hours** ($\tau$).
+* Characterized by a **pure dead time of 2 to 3 hours** (theta) before heat reaches the room surface, and a **thermal dissipation time constant of 12 to 20 hours** (tau).
 
 ### 3. Hydronic Underfloor Systems with Water Return Sensors
 * Loop return temperature sensor directly measures the core slab thermal state with near-zero dead time.
@@ -36,7 +36,7 @@ This integration is purpose-built to solve the acute regulation challenges of **
 ## Why standard PID thermostats fail on heavy slabs
 
 Standard PID thermostats (such as `smart_thermostat`) are ill-adapted for heavy underfloor heating:
-1. **Dead Time ($\theta \approx 2\text{h}$ to $3\text{h}$)**: Heat takes hours to diffuse through the slab. During this time, the error persists, the integral term saturates (*integral windup*), forcing the heater to run too long and causing massive overshoots (+1.5°C to +2.5°C).
+1. **Dead Time (θ ≈ 2h to 3h)**: Heat takes hours to diffuse through the slab. During this time, the error persists, the integral term saturates (*integral windup*), forcing the heater to run too long and causing massive overshoots (+1.5°C to +2.5°C).
 2. **Destructive Compressor Short-Cycling**: PID algorithms frequently oscillate around the setpoint, turning on/off compressors within minutes—severely damaging Danfoss compressors without guaranteed oil return and pressure equalization.
 3. **No Tariff Optimization**: Conventional thermostats heat reactively whenever ambient temperature drops, missing the opportunity to store cheap calories in the slab during Off-Peak hours (*Heures Creuses*).
 
@@ -45,28 +45,28 @@ Standard PID thermostats (such as `smart_thermostat`) are ill-adapted for heavy 
 ## Beyond the Heating Curve (*Loi d'Eau*): Predictive Time-Modulated Quotas
 
 Traditional hydronic heating systems rely on a **Heating Curve (*Loi d'eau*)**, which calculates the supply water temperature dynamically from instantaneous outdoor temperature:
-$$T_{\text{water\_supply}} = T_{\text{setpoint}} + \text{Slope} \times (T_{\text{setpoint}} - T_{\text{outdoor}})$$
+> `T_water_supply = T_setpoint + Slope * (T_setpoint - T_outdoor)`
 
 ### Why the classical Heating Curve fails on fixed-speed & heavy slab systems:
-1. **Compressors cannot modulate flow temperature**: Fixed-speed scroll or hermetic reciprocating compressors (Danfoss, Copeland) run at **100% capacity or 0%**. In direct-expansion systems, condensing refrigerant enters the slab at a constant thermodynamic condensing temperature ($\approx 35^\circ\text{C}$ to $40^\circ\text{C}$). Flow temperature modulation is physically impossible.
-2. **Phase Lag & The Morning Cold Dip**: When a winter night freeze occurs at 04:00 AM, a reactive heating curve responds at 04:00 AM. But with a $\theta = 2.25\text{ h}$ dead time, heat only emerges into the living space around 06:30 or 07:00 AM—resulting in the infamous morning temperature drop.
+1. **Compressors cannot modulate flow temperature**: Fixed-speed scroll or hermetic reciprocating compressors (Danfoss, Copeland) run at **100% capacity or 0%**. In direct-expansion systems, condensing refrigerant enters the slab at a constant thermodynamic condensing temperature (~35°C to 40°C). Flow temperature modulation is physically impossible.
+2. **Phase Lag & The Morning Cold Dip**: When a winter night freeze occurs at 04:00 AM, a reactive heating curve responds at 04:00 AM. But with a theta = 2.25 h dead time, heat only emerges into the living space around 06:30 or 07:00 AM—resulting in the infamous morning temperature drop.
 3. **Blindness to Tariff Opportunities**: A heating curve forces heating whenever outdoor temperature is cold, regardless of peak electricity pricing.
 
 ### The Solution: From Water Temperature Modulation to Time Modulation (PWM)
 Instead of varying supply temperature, **`pwm_floor_heating_thermostat` modulates the compressor operating time over a 24-hour horizon**:
-$$E_{\text{daily\_quota}} (\text{kWh}) = \frac{H \cdot (T_{\text{setpoint}} - \bar{T}_{\text{outdoor, 24h}}) \cdot 24\text{ h}}{1000}$$
-$$\text{Compressor Hours Required} = \frac{E_{\text{daily\_quota}} \cdot 1000}{P_{\text{thermal}} (\text{W})}$$
+> `Daily Quota (kWh) = [ H * (T_setpoint - T_outdoor_avg) * 24h ] / 1000`
+> `Compressor Hours Needed = (Daily Quota * 1000) / P_thermal_watts`
 
 ### Role of `outdoor_sensor` / `outdoor_temperature_forecast`
-The slab acts as a physical low-pass thermal filter. The outdoor temperature that the slab "sees" as it delivers a heat pulse is not the instantaneous reading at minute $t$, but the thermal profile over the traversal window:
-* **Option A: Forecast Sliding Window ($H_0 \rightarrow H+4$) [Recommended]**: Providing an outdoor temperature sensor averaged over the next 4 hours (e.g. from Météo-France or a weather integration) mirrors the exact heat loss profile the building will undergo while the injected heat wave travels through the screed.
+The slab acts as a physical low-pass thermal filter. The outdoor temperature that the slab "sees" as it delivers a heat pulse is not the instantaneous reading at minute t, but the thermal profile over the traversal window:
+* **Option A: Forecast Sliding Window (H0 -> H+4) [Recommended]**: Providing an outdoor temperature sensor averaged over the next 4 hours (e.g. from Météo-France or a weather integration) mirrors the exact heat loss profile the building will undergo while the injected heat wave travels through the screed.
 * **Option B: Real-Time Instantaneous Sensor**: If no forecast sensor is available, a standard outdoor probe works natively, with the model estimating the daily budget from continuous readings.
 
 ---
 
 ## Key Features
 
-- 🏗️ **Thermodynamic Slab Model**: Predicts the daily heat deficit based on outdoor temperature (current and forecast) and house heat loss ($H$ in W/K).
+- 🏗️ **Thermodynamic Slab Model**: Predicts the daily heat deficit based on outdoor temperature (current and forecast) and house heat loss (H in W/K).
 - ⏱️ **Predictive Dead-Time Anticipation**: Projects the slab's internal thermal wave to prevent cold morning drops without overshooting.
 - 🛡️ **Danfoss Compressor Safety Guard**: Built-in, non-bypassable FSM:
   - Minimum ON cycle: 30 minutes (ensures complete oil return).
@@ -75,7 +75,7 @@ The slab acts as a physical low-pass thermal filter. The outdoor temperature tha
 - 💧 **Hydronic Water Circuit Feedback**: Optional `floor_temp_sensor` monitoring the loop return water temperature for DTU 65.14 max floor temperature cutoffs (28°C) and freeze protection.
 - ⚡ **Dynamic Off-Peak (*Heures Creuses*) Scheduling**: Prioritizes running long charging cycles when electricity is cheapest (Linky TIC / dynamic sensor integration).
 - 👻 **Shadow Mode / Digital Twin (Dry-Run)**: Run in parallel with an existing legacy thermostat without actuating physical relays to compare theoretical decisions against real curves before live switchover.
-- 🔍 **AI Auto-Tuning & Telemetry**: Exposes model error $e_{\text{model}}$, trajectory projections, energy quota, passive cooling rates, and FSM diagnostics for automated calibration via AI agents or analytics.
+- 🔍 **AI Auto-Tuning & Telemetry**: Exposes model error e_model, trajectory projections, energy quota, passive cooling rates, and FSM diagnostics for automated calibration via AI agents or analytics.
 - 🔄 **Restart-Resilient**: Inherits `RestoreEntity`—restores running state, elapsed timers, and cycle counts after Home Assistant reboots.
 
 ---
