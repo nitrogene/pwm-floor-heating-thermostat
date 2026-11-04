@@ -25,6 +25,7 @@ from homeassistant.components.climate import (
 from homeassistant.const import (
     ATTR_TEMPERATURE,
     CONF_NAME,
+    CONF_UNIQUE_ID,
     EVENT_HOMEASSISTANT_START,
     PRECISION_TENTHS,
     UnitOfTemperature,
@@ -80,6 +81,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
+        vol.Optional(CONF_UNIQUE_ID): cv.string,
         vol.Optional(CONF_HEATER): cv.entity_id,
         vol.Required(CONF_TARGET_SENSOR): cv.entity_id,
         vol.Required(CONF_OUTDOOR_SENSOR): cv.entity_id,
@@ -123,6 +125,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         """Initialisation de l'entité."""
         self.hass = hass
         self._name = config[CONF_NAME]
+        self._unique_id = config.get(CONF_UNIQUE_ID)
         self._heater_entity = config.get(CONF_HEATER)
         self._target_sensor = config[CONF_TARGET_SENSOR]
         self._outdoor_sensor = config[CONF_OUTDOOR_SENSOR]
@@ -246,6 +249,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             _async_startup()
         else:
             self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, _async_startup)
+
+    @property
+    def unique_id(self) -> str | None:
+        """Identifiant unique de l'entité."""
+        return self._unique_id
 
     @property
     def name(self) -> str:
