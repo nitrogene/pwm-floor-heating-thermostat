@@ -18,7 +18,12 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
   - [ ] Modéliser le transfert thermique passif entre zones communicantes (ex: flux d'air chaud ascendant du Salon vers la mezzanine du Bureau).
   - [ ] Coordinateur multi-zones optionnel pour lisser l'appel de puissance électrique (éviter d'allumer tous les compresseurs simultanément).
 - [ ] **Auto-étalonnage & Apprentissage continu :**
-  - [ ] Recalcul périodique des déperditions $H$ ($\text{W/K}$) par régression linéaire sur les phases de refroidissement libre nocturne ($dT/dt$ vs $\Delta T_{\text{int-ext}}$).
+  - [ ] Recalcul périodique des déperditions $H = U \cdot A$ ($\text{W/K}$) par régression linéaire sur les phases de refroidissement libre nocturne ($dT/dt$ vs $\Delta T_{\text{int-ext}}$).
+  - [ ] **Mode A (Conseiller & Télémétrie passif) :** Exposition de l'attribut `heat_loss_measured_wk` affichant la déperdition réelle mesurée du bâtiment sans impact direct sur la commande.
+  - [ ] **Mode B (Auto-adaptation douce optionnelle `auto_calibrate_heat_loss: true`) :**
+    - [ ] Conditions de validation strictes (nuit, compresseur éteint depuis $> \theta$, stabilité).
+    - [ ] Filtre à dérive lente exponentielle (IIR 95/5) évitant tout à-coup.
+    - [ ] Garde-fous indépassables bornés à $\pm 20\%$ autour de la valeur de base du YAML.
   - [ ] Ajustement dynamique de la constante de temps de dalle $\tau$ et du temps mort $\theta$.
 
 ---
@@ -39,6 +44,22 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
   - [x] Coupure d'urgence anti-surchauffe dalle `max_floor_temp` (défaut 28.0°C conforme à la norme DTU 65.14).
   - [x] Protection hors-gel plancher `min_floor_temp` (défaut 14.0°C).
   - [x] Attributs télémétriques `floor_temperature`, `max_floor_temperature`, `min_floor_temperature`.
+- [x] **Plafonnement Quota Journalier & Anti-Gaspillage Heures Pleines :**
+  - [x] Options `enforce_daily_quota` et `enforce_daily_quota_sensor` pour débrayage direct via switch Lovelace.
+  - [x] Inhibition automatique des cycles en Heures Pleines si le quota 24h est atteint en Heures Creuses.
+  - [x] Filet de sécurité confort absolu (déclenchement forcé si écart consigne $\ge 0.8$°C).
+  - [x] Télémétrie en temps réel (`daily_quota_enforced`, `daily_quota_blocked`, `heating_hours_remaining_24h`).
+- [ ] **Détection d'aération / Fenêtre ouverte (`window_detection`) :**
+  - [ ] Détection automatique par analyse de rupture brutale de pente ($dT/dt \le -1.5^\circ\text{C/h}$ ou chute $> 0.4^\circ\text{C}$ en 15 min).
+  - [ ] Support d'un capteur d'ouverture physique optionnel (`window_sensor: binary_sensor.*`).
+  - [ ] Suspension immédiate de la chauffe avec état `window_open` et timer de reprise automatique pour ne pas chauffer l'extérieur.
+- [ ] **Coordination Multi-Zones & Déphasage Anti-Pic de Démarrage (`stagger_delay`) :**
+  - [ ] Éviter l'enclenchement simultané des compresseurs au passage en Heures Creuses (appel de puissance cumulé de 13 kW thermiques).
+  - [ ] Décalage paramétrable (ex: `stagger_delay: "00:05:00"`) ou ordonnancement prioritaire entre zones géothermiques.
+- [ ] **Support natif des Presets Home Assistant (`Comfort`, `Eco`, `Away`) :**
+  - [ ] Déclaration des presets natifs `preset_modes: ["comfort", "eco", "away"]`.
+  - [ ] Consignes dédiées `eco_temp` (ex: 17.5°C) et `away_temp` (ex: 15.0°C).
+  - [ ] Bascule en 1 clic dans Lovelace sans écraser la consigne principale nominale.
 - [ ] **Optimisation tarifaire Heures Creuses (Linky TIC) :**
   - [ ] Allocation prioritaire du quota thermique journalier pendant les Heures Creuses nocturnes.
   - [ ] Modulation de la durée des cycles PWM (ex: cycles de 2h30 en HC vs cycles de 45 min en HP si besoin impérieux).

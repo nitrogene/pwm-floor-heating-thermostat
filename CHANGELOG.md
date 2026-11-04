@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.4] - 2026-11-04
+## [0.1.5] - 2026-11-04
+
+### Added
+- **Open Window / Rapid Ventilation Detection**:
+  - Added `window_detection` (boolean, default: true) and `window_detection_sensor` (`input_boolean` entity) for full UI toggle override from Lovelace.
+  - Added `window_sensor` (`binary_sensor`) option for direct physical magnetic contact sensors.
+  - Automatic drop detection: detects rapid temperature drops ($\ge 0.4^\circ\text{C}$ in $\le 15$ minutes or $dT/dt \le -1.5^\circ\text{C/h}$).
+  - Heating suspension: immediately inhibits compressor start or safely winds down running cycle via Danfoss FSM without violating oil lubrication guards.
+  - Auto-recovery: resumes regulation when temperature starts rising ($> +0.2^\circ\text{C/h}$) or after `window_timeout` (default: 30 minutes).
+  - New telemetry attributes: `window_detection_active`, `window_open_detected`.
+- **Passive Building Heat Loss Auto-Calibration (Mode A - Advisory Telemetry)**:
+  - Continuously identifies the actual physical heat loss coefficient $U \cdot A$ ($W/K$) during relaxed passive night decay periods ($t_{\text{off}} \ge 2 \cdot \theta$, $\Delta T \ge 3^\circ\text{C}$, $dT/dt < -0.05^\circ\text{C/h}$, window closed).
+  - Employs a robust outlier rejection filter and a slow 98/2 IIR exponential smoothing filter.
+  - Persists learned value across Home Assistant reboots via `RestoreEntity`.
+  - New telemetry attributes: `heat_loss_measured_wk` and `heat_loss_samples_count`.
 
 ### Added
 - **Dynamic Daily Quota Enforcement (Anti-Peak Tariff Protection)**:

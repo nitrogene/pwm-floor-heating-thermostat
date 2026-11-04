@@ -36,6 +36,17 @@ CONF_ENFORCE_DAILY_QUOTA = "enforce_daily_quota"
 CONF_ENFORCE_DAILY_QUOTA_SENSOR = "enforce_daily_quota_sensor"
 DEFAULT_ENFORCE_DAILY_QUOTA = True
 
+# Détection d'aération / Fenêtre ouverte
+CONF_WINDOW_DETECTION = "window_detection"
+CONF_WINDOW_DETECTION_SENSOR = "window_detection_sensor"
+CONF_WINDOW_SENSOR = "window_sensor"
+CONF_WINDOW_DROP_THRESHOLD = "window_drop_threshold"
+CONF_WINDOW_TIMEOUT = "window_timeout"
+
+DEFAULT_WINDOW_DETECTION = True
+DEFAULT_WINDOW_DROP_THRESHOLD = 0.4  # Chute de 0.4°C en <= 15 min
+DEFAULT_WINDOW_TIMEOUT = timedelta(minutes=30)
+
 # Valeurs par défaut
 DEFAULT_NAME = "PWM Floor Heating Thermostat"
 DEFAULT_TARGET_TEMP = 19.0

@@ -176,6 +176,13 @@ climate:
     # Anti-Peak Tariff Quota Enforcement
     enforce_daily_quota: true                              # Inhibit unnecessary Peak-Hour cycles once daily quota is fulfilled
     enforce_daily_quota_sensor: input_boolean.enforce_daily_quota_living_room # Optional: toggle switch directly in Lovelace UI
+    
+    # Open Window / Rapid Ventilation Detection
+    window_detection: true                                 # Inhibit heating during rapid temperature drops or open window
+    window_detection_sensor: input_boolean.window_detection_living_room # Optional: toggle switch in Lovelace UI
+    # window_sensor: binary_sensor.living_room_window_contact # Optional: physical magnetic contact sensor
+    window_drop_threshold: 0.4                             # °C drop over 15 min to trigger suspension
+    window_timeout: "00:30:00"                             # Auto-resume timeout
 ```
 
 > [!NOTE]

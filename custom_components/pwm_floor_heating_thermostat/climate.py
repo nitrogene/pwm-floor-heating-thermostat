@@ -61,6 +61,11 @@ from .const import (
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
     CONF_TARGET_SENSOR,
+    CONF_WINDOW_DETECTION,
+    CONF_WINDOW_DETECTION_SENSOR,
+    CONF_WINDOW_DROP_THRESHOLD,
+    CONF_WINDOW_SENSOR,
+    CONF_WINDOW_TIMEOUT,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
     DEFAULT_ENFORCE_DAILY_QUOTA,
@@ -74,6 +79,9 @@ from .const import (
     DEFAULT_POWER_WATTS,
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_TARGET_TEMP,
+    DEFAULT_WINDOW_DETECTION,
+    DEFAULT_WINDOW_DROP_THRESHOLD,
+    DEFAULT_WINDOW_TIMEOUT,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
     FSM_RUNNING_NORMAL,
@@ -105,6 +113,11 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_MAX_CYCLES_PER_DAY, default=DEFAULT_MAX_CYCLES): vol.Coerce(int),
         vol.Optional(CONF_ENFORCE_DAILY_QUOTA, default=DEFAULT_ENFORCE_DAILY_QUOTA): cv.boolean,
         vol.Optional(CONF_ENFORCE_DAILY_QUOTA_SENSOR): cv.entity_id,
+        vol.Optional(CONF_WINDOW_DETECTION, default=DEFAULT_WINDOW_DETECTION): cv.boolean,
+        vol.Optional(CONF_WINDOW_DETECTION_SENSOR): cv.entity_id,
+        vol.Optional(CONF_WINDOW_SENSOR): cv.entity_id,
+        vol.Optional(CONF_WINDOW_DROP_THRESHOLD, default=DEFAULT_WINDOW_DROP_THRESHOLD): vol.Coerce(float),
+        vol.Optional(CONF_WINDOW_TIMEOUT, default=DEFAULT_WINDOW_TIMEOUT): cv.time_period,
     }
 )
 
@@ -160,6 +173,19 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._enforce_daily_quota_sensor = config.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)
         self._quota_blocked = False
 
+        # Détection d'aération / Fenêtre ouverte
+        self._window_detection_enabled = config[CONF_WINDOW_DETECTION]
+        self._window_detection_sensor = config.get(CONF_WINDOW_DETECTION_SENSOR)
+        self._window_sensor = config.get(CONF_WINDOW_SENSOR)
+        self._window_drop_threshold = config[CONF_WINDOW_DROP_THRESHOLD]
+        self._window_timeout = config[CONF_WINDOW_TIMEOUT]
+        self._window_open = False
+        self._window_open_time: datetime | None = None
+
+        # Auto-calibrage continu de la déperdition H (Mode A passif)
+        self._heat_loss_measured_wk: float | None = None
+        self._heat_loss_samples_count: int = 0
+
         # État courant
         self._cur_temp: float | None = None
         self._outdoor_temp: float | None = None
@@ -209,6 +235,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._temp_derivative = float(old_attrs["temp_derivative_hourly"])
                 except (ValueError, TypeError):
                     pass
+            if "heat_loss_measured_wk" in old_attrs and old_attrs["heat_loss_measured_wk"] is not None:
+                try:
+                    self._heat_loss_measured_wk = float(old_attrs["heat_loss_measured_wk"])
+                except (ValueError, TypeError):
+                    pass
 
         # Écouteurs de changement d'état
         self.async_on_remove(
@@ -246,6 +277,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self.async_on_remove(
                 async_track_state_change_event(
                     self.hass, [self._enforce_daily_quota_sensor], self._async_quota_sensor_changed
+                )
+            )
+
+        if self._window_detection_sensor:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._window_detection_sensor], self._async_window_detection_sensor_changed
+                )
+            )
+
+        if self._window_sensor:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._window_sensor], self._async_window_sensor_changed
                 )
             )
 
@@ -320,6 +365,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if st_q and st_q.state not in ["unknown", "unavailable"]:
                 quota_enforcement_active = st_q.state == "on"
 
+        window_detection_active = self._window_detection_enabled
+        if self._window_detection_sensor:
+            st_w = self.hass.states.get(self._window_detection_sensor)
+            if st_w and st_w.state not in ["unknown", "unavailable"]:
+                window_detection_active = st_w.state == "on"
+
         run_hours = self._total_heating_hours_today
 
         return {
@@ -343,6 +394,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "heating_hours_remaining_24h": round(max(0.0, self._hours_needed_24h - run_hours), 2),
             "daily_quota_enforced": quota_enforcement_active,
             "daily_quota_blocked": self._quota_blocked,
+            "window_detection_active": window_detection_active,
+            "window_open_detected": self._window_open,
+            "heat_loss_measured_wk": self._heat_loss_measured_wk,
+            "heat_loss_samples_count": self._heat_loss_samples_count,
             "compressor_cycles_today": self._cycles_today,
             "min_cycle_lock_remaining_sec": min_on_rem,
             "min_off_lock_remaining_sec": min_off_rem,
@@ -428,6 +483,35 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 "Interrupteur de plafonnement de quota journalier %s basculé sur %s",
                 self._enforce_daily_quota_sensor,
                 new_state.state,
+            )
+            self.hass.async_create_task(self._async_control_heating())
+
+    @callback
+    def _async_window_detection_sensor_changed(self, event) -> None:
+        """Réaction dynamique immédiate au basculement de l'interrupteur UI de détection de fenêtre."""
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            _LOGGER.debug(
+                "Interrupteur de détection de fenêtre %s basculé sur %s",
+                self._window_detection_sensor,
+                new_state.state,
+            )
+            if new_state.state != "on":
+                self._window_open = False
+                self._window_open_time = None
+            self.hass.async_create_task(self._async_control_heating())
+
+    @callback
+    def _async_window_sensor_changed(self, event) -> None:
+        """Réaction immédiate à l'ouverture/fermeture d'un capteur physique de fenêtre."""
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            self._window_open = new_state.state == "on"
+            self._window_open_time = dt_util.utcnow() if self._window_open else None
+            _LOGGER.info(
+                "Capteur physique de fenêtre %s : %s",
+                self._window_sensor,
+                "OUVERTE" if self._window_open else "FERMÉE",
             )
             self.hass.async_create_task(self._async_control_heating())
 
@@ -525,6 +609,57 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # 1. Mise à jour de la projection de trajectoire
         self._update_trajectory_projection(now_utc)
 
+        # Détection d'aération / Fenêtre ouverte
+        window_detection_active = self._window_detection_enabled
+        if self._window_detection_sensor:
+            st_w = self.hass.states.get(self._window_detection_sensor)
+            if st_w and st_w.state not in ["unknown", "unavailable"]:
+                window_detection_active = st_w.state == "on"
+
+        if window_detection_active:
+            if self._window_sensor:
+                st_ws = self.hass.states.get(self._window_sensor)
+                if st_ws and st_ws.state not in ["unknown", "unavailable"]:
+                    self._window_open = st_ws.state == "on"
+                    if self._window_open and self._window_open_time is None:
+                        self._window_open_time = now_utc
+                    elif not self._window_open:
+                        self._window_open_time = None
+            else:
+                # Détection automatique de chute rapide de température
+                if self._window_open:
+                    if self._window_open_time and (now_utc - self._window_open_time) >= self._window_timeout:
+                        _LOGGER.info(
+                            "Fenêtre ouverte : délai d'aération maximal atteint (%s). Reprise automatique.",
+                            self._window_timeout,
+                        )
+                        self._window_open = False
+                        self._window_open_time = None
+                    elif self._temp_derivative > 0.2:
+                        _LOGGER.info(
+                            "Fenêtre refermée : remontée de température observée (+%.2f°C/h). Reprise.",
+                            self._temp_derivative,
+                        )
+                        self._window_open = False
+                        self._window_open_time = None
+                else:
+                    cutoff_15m = now_utc - timedelta(minutes=15)
+                    recent_temps = [v for t, v in self._temp_history if t >= cutoff_15m]
+                    if recent_temps and self._cur_temp is not None:
+                        max_recent = max(recent_temps)
+                        drop = max_recent - self._cur_temp
+                        if drop >= self._window_drop_threshold or (self._temp_derivative <= -1.5 and drop >= 0.2):
+                            self._window_open = True
+                            self._window_open_time = now_utc
+                            _LOGGER.warning(
+                                "Aération détectée (chute de %.2f°C en <= 15 min, pente %.2f°C/h). Suspension de la chauffe.",
+                                drop,
+                                self._temp_derivative,
+                            )
+        else:
+            self._window_open = False
+            self._window_open_time = None
+
         # 2. Calcul du Quota d'Énergie Thermique requis (kWh sur 24h)
         if self._outdoor_temp is not None:
             delta_t = max(0.0, self._target_temp - self._outdoor_temp)
@@ -596,6 +731,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                         f"Peak-hour cycle inhibited by quota enforcement (switch ON)."
                     )
 
+            # Règle E : Détection de fenêtre ouverte / aération
+            if self._window_open:
+                should_heat = False
+                self._decision_reason = "Open window / ventilation detected. Heating suspended."
+
         # 5. Garde-fous plancher chauffant / boucle d'eau (si capteur configuré)
         if self._floor_temp is not None:
             if self._floor_temp >= self._max_floor_temp:
@@ -616,6 +756,33 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             await self._async_start_heating_safe()
         else:
             await self._async_stop_heating_safe()
+
+        # 7. Auto-étalonnage passif de la déperdition thermique (Mode A - Conseiller Télémétrique)
+        if (
+            self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]
+            and not self._window_open
+            and self._cur_temp is not None
+            and self._outdoor_temp is not None
+        ):
+            time_since_stop = (now_utc - self._last_state_change).total_seconds()
+            required_rest = 2.0 * self._dead_time * 3600.0  # Dalle relaxée (> 2 * theta)
+            delta_t = self._cur_temp - self._outdoor_temp
+
+            if time_since_stop >= required_rest and delta_t >= 3.0 and self._temp_derivative < -0.05:
+                # C_eff = slab_tau_hours * heat_loss_wk (en Wh/K)
+                c_eff = self._slab_tau * self._heat_loss
+                p_loss = -c_eff * self._temp_derivative  # Watts
+                sample_ua = p_loss / delta_t
+
+                # Filtrage des perturbations : sample dans [0.3 * H, 3.0 * H]
+                if 0.3 * self._heat_loss <= sample_ua <= 3.0 * self._heat_loss:
+                    if self._heat_loss_measured_wk is None:
+                        self._heat_loss_measured_wk = round(sample_ua, 1)
+                    else:
+                        self._heat_loss_measured_wk = round(
+                            0.98 * self._heat_loss_measured_wk + 0.02 * sample_ua, 1
+                        )
+                    self._heat_loss_samples_count += 1
 
         self.async_write_ha_state()
 
