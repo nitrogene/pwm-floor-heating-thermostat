@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag de la release (ex: v0.1.2)'
+        description: 'Tag de la release (ex: v0.1.3)'
         required: true
-        default: 'v0.1.2'
+        default: 'v0.1.3'
 
 jobs:
   release:
@@ -32,11 +32,36 @@ jobs:
             echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Extract Release Notes from CHANGELOG.md
+        run: |
+          python - << 'EOF'
+          import re, os
+
+          tag = os.environ.get("TAG_NAME", "").lstrip("v")
+          version_pattern = re.compile(rf"^##\s+\[{re.escape(tag)}\].*$", re.MULTILINE)
+
+          with open("CHANGELOG.md", "r", encoding="utf-8") as f:
+              content = f.read()
+
+          match = version_pattern.search(content)
+          if match:
+              start = match.end()
+              next_match = re.search(r"^##\s+\[.*\]", content[start:], re.MULTILINE)
+              notes = content[start:start + next_match.start()].strip() if next_match else content[start:].strip()
+          else:
+              notes = "Maintenance release."
+
+          with open("RELEASE_NOTES.md", "w", encoding="utf-8") as out:
+              out.write(notes + "\n\n---\n**Full Changelog**: https://github.com/nitrogene/pwm-floor-heating-thermostat/commits/" + os.environ.get("TAG_NAME", "") + "\n")
+          EOF
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.tag }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
