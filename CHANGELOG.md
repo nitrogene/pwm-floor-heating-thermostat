@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.5] - 2026-11-04
+## [0.1.6] - 2026-11-04
+
+### Added
+- **Native Home Assistant Presets (`comfort`, `eco`, `away`)**:
+  - Integrated standard `ClimateEntityFeature.PRESET_MODE` with `comfort`, `eco`, and `away` modes.
+  - Dedicated configurable setpoints: `eco_temp` (default: 17.0°C), `away_temp` (default: 15.0°C), and `comfort_temp` (default: target_temp).
+  - One-click preset switching directly from Lovelace without losing the nominal comfort setpoint.
+  - State restoration across Home Assistant reboots via `RestoreEntity`.
+  - Extra state attributes: `comfort_temp`, `eco_temp`, `away_temp`.
+- **Multi-Zone Coordination & Anti-Inrush Peak Staggering (`stagger_delay`)**:
+  - Added `stagger_delay` (time period, default: 0s) to sequence compressor startups across multiple zones (e.g. 0s Salon, 5 min Chambre, 10 min Bureau).
+  - Prevents massive electrical grid inrush current spikes and 13 kW simultaneous power surges when switching into cheap Off-Peak hours.
+  - Exposes `stagger_delay_sec` in attributes with realtime countdown in `decision_reason`.
 
 ### Added
 - **Open Window / Rapid Ventilation Detection**:

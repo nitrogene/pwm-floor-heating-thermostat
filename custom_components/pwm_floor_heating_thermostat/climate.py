@@ -17,6 +17,10 @@ from datetime import datetime, timedelta
 import voluptuous as vol
 from homeassistant.components.climate import (
     PLATFORM_SCHEMA,
+    PRESET_AWAY,
+    PRESET_COMFORT,
+    PRESET_ECO,
+    PRESET_NONE,
     ClimateEntity,
     ClimateEntityFeature,
     HVACAction,
@@ -42,8 +46,11 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_AWAY_TEMP,
+    CONF_COMFORT_TEMP,
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
+    CONF_ECO_TEMP,
     CONF_ENFORCE_DAILY_QUOTA,
     CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
@@ -60,14 +67,17 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
+    CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_DETECTION_SENSOR,
     CONF_WINDOW_DROP_THRESHOLD,
     CONF_WINDOW_SENSOR,
     CONF_WINDOW_TIMEOUT,
+    DEFAULT_AWAY_TEMP,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
+    DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HEAT_LOSS,
     DEFAULT_MAX_CYCLES,
@@ -78,6 +88,7 @@ from .const import (
     DEFAULT_NAME,
     DEFAULT_POWER_WATTS,
     DEFAULT_SLAB_TAU_HOURS,
+    DEFAULT_STAGGER_DELAY,
     DEFAULT_TARGET_TEMP,
     DEFAULT_WINDOW_DETECTION,
     DEFAULT_WINDOW_DROP_THRESHOLD,
@@ -118,6 +129,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_WINDOW_SENSOR): cv.entity_id,
         vol.Optional(CONF_WINDOW_DROP_THRESHOLD, default=DEFAULT_WINDOW_DROP_THRESHOLD): vol.Coerce(float),
         vol.Optional(CONF_WINDOW_TIMEOUT, default=DEFAULT_WINDOW_TIMEOUT): cv.time_period,
+        vol.Optional(CONF_ECO_TEMP, default=DEFAULT_ECO_TEMP): vol.Coerce(float),
+        vol.Optional(CONF_AWAY_TEMP, default=DEFAULT_AWAY_TEMP): vol.Coerce(float),
+        vol.Optional(CONF_COMFORT_TEMP): vol.Coerce(float),
+        vol.Optional(CONF_STAGGER_DELAY, default=DEFAULT_STAGGER_DELAY): cv.time_period,
     }
 )
 
@@ -136,8 +151,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     _attr_precision = PRECISION_TENTHS
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
+    _attr_preset_modes = [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
 
     def __init__(self, hass: HomeAssistant, config: ConfigType) -> None:
         """Initialisation de l'entité."""
@@ -185,6 +201,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Auto-calibrage continu de la déperdition H (Mode A passif)
         self._heat_loss_measured_wk: float | None = None
         self._heat_loss_samples_count: int = 0
+
+        # Presets de température
+        self._eco_temp = config[CONF_ECO_TEMP]
+        self._away_temp = config[CONF_AWAY_TEMP]
+        self._comfort_temp = config.get(CONF_COMFORT_TEMP, DEFAULT_TARGET_TEMP)
+        self._preset_mode: str = PRESET_COMFORT
+
+        # Coordination Multi-Zones & Déphasage Anti-Pic de démarrage
+        self._stagger_delay = config[CONF_STAGGER_DELAY]
+        self._demand_start_time: datetime | None = None
 
         # État courant
         self._cur_temp: float | None = None
@@ -238,6 +264,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if "heat_loss_measured_wk" in old_attrs and old_attrs["heat_loss_measured_wk"] is not None:
                 try:
                     self._heat_loss_measured_wk = float(old_attrs["heat_loss_measured_wk"])
+                except (ValueError, TypeError):
+                    pass
+            if old_preset := old_attrs.get("preset_mode"):
+                if old_preset in [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY, PRESET_NONE]:
+                    self._preset_mode = old_preset
+            if old_comfort := old_attrs.get("comfort_temp"):
+                try:
+                    self._comfort_temp = float(old_comfort)
                 except (ValueError, TypeError):
                     pass
 
@@ -333,6 +367,39 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         return self._target_temp
 
     @property
+    def preset_mode(self) -> str | None:
+        """Mode preset actif."""
+        return self._preset_mode
+
+    @property
+    def preset_modes(self) -> list[str]:
+        """Modes presets disponibles."""
+        return [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Bascule du mode preset (Comfort, Eco, Away)."""
+        if preset_mode == self._preset_mode:
+            return
+
+        if preset_mode == PRESET_ECO:
+            self._comfort_temp = self._target_temp
+            self._target_temp = self._eco_temp
+            self._preset_mode = PRESET_ECO
+        elif preset_mode == PRESET_AWAY:
+            self._comfort_temp = self._target_temp
+            self._target_temp = self._away_temp
+            self._preset_mode = PRESET_AWAY
+        elif preset_mode in [PRESET_COMFORT, PRESET_NONE]:
+            self._target_temp = self._comfort_temp
+            self._preset_mode = PRESET_COMFORT
+        else:
+            _LOGGER.warning("Preset mode non reconnu : %s", preset_mode)
+            return
+
+        await self._async_control_heating()
+        self.async_write_ha_state()
+
+    @property
     def hvac_mode(self) -> HVACMode:
         """Mode de fonctionnement actuel."""
         return self._hvac_mode
@@ -398,6 +465,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "window_open_detected": self._window_open,
             "heat_loss_measured_wk": self._heat_loss_measured_wk,
             "heat_loss_samples_count": self._heat_loss_samples_count,
+            "comfort_temp": self._comfort_temp,
+            "eco_temp": self._eco_temp,
+            "away_temp": self._away_temp,
+            "stagger_delay_sec": int(self._stagger_delay.total_seconds()),
             "compressor_cycles_today": self._cycles_today,
             "min_cycle_lock_remaining_sec": min_on_rem,
             "min_off_lock_remaining_sec": min_off_rem,
@@ -409,6 +480,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         """Ajustement de la consigne de température."""
         if (temp := kwargs.get(ATTR_TEMPERATURE)) is not None:
             self._target_temp = float(temp)
+            if self._preset_mode in [PRESET_COMFORT, PRESET_NONE]:
+                self._comfort_temp = self._target_temp
             await self._async_control_heating()
             self.async_write_ha_state()
 
@@ -736,6 +809,21 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 should_heat = False
                 self._decision_reason = "Open window / ventilation detected. Heating suspended."
 
+        # Règle F : Déphasage anti-pic de démarrage multi-zones
+        stagger_remaining_sec = 0
+        if should_heat and self._fsm_state == FSM_IDLE and self._stagger_delay.total_seconds() > 0:
+            if self._demand_start_time is None:
+                self._demand_start_time = now_utc
+            demand_elapsed = (now_utc - self._demand_start_time).total_seconds()
+            if demand_elapsed < self._stagger_delay.total_seconds():
+                stagger_remaining_sec = int(self._stagger_delay.total_seconds() - demand_elapsed)
+                should_heat = False
+                self._decision_reason = (
+                    f"Staggered startup delay ({stagger_remaining_sec}s remaining, anti inrush peak protection)"
+                )
+        elif not should_heat:
+            self._demand_start_time = None
+
         # 5. Garde-fous plancher chauffant / boucle d'eau (si capteur configuré)
         if self._floor_temp is not None:
             if self._floor_temp >= self._max_floor_temp:
@@ -825,6 +913,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
+        self._demand_start_time = None
         self._hvac_action = HVACAction.HEATING
         self._cycles_today += 1
 

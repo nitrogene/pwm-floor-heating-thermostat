@@ -47,6 +47,18 @@ DEFAULT_WINDOW_DETECTION = True
 DEFAULT_WINDOW_DROP_THRESHOLD = 0.4  # Chute de 0.4°C en <= 15 min
 DEFAULT_WINDOW_TIMEOUT = timedelta(minutes=30)
 
+# Presets de température (Comfort, Eco, Away)
+CONF_ECO_TEMP = "eco_temp"
+CONF_AWAY_TEMP = "away_temp"
+CONF_COMFORT_TEMP = "comfort_temp"
+
+DEFAULT_ECO_TEMP = 17.0
+DEFAULT_AWAY_TEMP = 15.0
+
+# Coordination Multi-Zones & Déphasage Anti-Pic de démarrage
+CONF_STAGGER_DELAY = "stagger_delay"
+DEFAULT_STAGGER_DELAY = timedelta(seconds=0)
+
 # Valeurs par défaut
 DEFAULT_NAME = "PWM Floor Heating Thermostat"
 DEFAULT_TARGET_TEMP = 19.0

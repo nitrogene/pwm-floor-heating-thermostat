@@ -183,6 +183,11 @@ climate:
     # window_sensor: binary_sensor.living_room_window_contact # Optional: physical magnetic contact sensor
     window_drop_threshold: 0.4                             # °C drop over 15 min to trigger suspension
     window_timeout: "00:30:00"                             # Auto-resume timeout
+    
+    # Presets & Multi-Zone Staggering
+    eco_temp: 17.0                                         # Preset Eco setpoint
+    away_temp: 15.0                                        # Preset Away setpoint (extended absence)
+    stagger_delay: "00:00:00"                              # Startup delay to stagger multiple zones (e.g. "00:05:00")
 ```
 
 > [!NOTE]

@@ -49,17 +49,17 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
   - [x] Inhibition automatique des cycles en Heures Pleines si le quota 24h est atteint en Heures Creuses.
   - [x] Filet de sécurité confort absolu (déclenchement forcé si écart consigne $\ge 0.8$°C).
   - [x] Télémétrie en temps réel (`daily_quota_enforced`, `daily_quota_blocked`, `heating_hours_remaining_24h`).
-- [ ] **Détection d'aération / Fenêtre ouverte (`window_detection`) :**
-  - [ ] Détection automatique par analyse de rupture brutale de pente ($dT/dt \le -1.5^\circ\text{C/h}$ ou chute $> 0.4^\circ\text{C}$ en 15 min).
-  - [ ] Support d'un capteur d'ouverture physique optionnel (`window_sensor: binary_sensor.*`).
-  - [ ] Suspension immédiate de la chauffe avec état `window_open` et timer de reprise automatique pour ne pas chauffer l'extérieur.
-- [ ] **Coordination Multi-Zones & Déphasage Anti-Pic de Démarrage (`stagger_delay`) :**
-  - [ ] Éviter l'enclenchement simultané des compresseurs au passage en Heures Creuses (appel de puissance cumulé de 13 kW thermiques).
-  - [ ] Décalage paramétrable (ex: `stagger_delay: "00:05:00"`) ou ordonnancement prioritaire entre zones géothermiques.
-- [ ] **Support natif des Presets Home Assistant (`Comfort`, `Eco`, `Away`) :**
-  - [ ] Déclaration des presets natifs `preset_modes: ["comfort", "eco", "away"]`.
-  - [ ] Consignes dédiées `eco_temp` (ex: 17.5°C) et `away_temp` (ex: 15.0°C).
-  - [ ] Bascule en 1 clic dans Lovelace sans écraser la consigne principale nominale.
+- [x] **Détection d'aération / Fenêtre ouverte (`window_detection`) :**
+  - [x] Détection automatique par analyse de rupture brutale de pente ($dT/dt \le -1.5^\circ\text{C/h}$ ou chute $> 0.4^\circ\text{C}$ en 15 min).
+  - [x] Support d'un capteur d'ouverture physique optionnel (`window_sensor: binary_sensor.*`) et d'un switch UI (`window_detection_sensor: input_boolean.*`).
+  - [x] Suspension immédiate de la chauffe avec état `window_open` et timer de reprise automatique pour ne pas chauffer l'extérieur.
+- [x] **Coordination Multi-Zones & Déphasage Anti-Pic de Démarrage (`stagger_delay`) :**
+  - [x] Éviter l'enclenchement simultané des compresseurs au passage en Heures Creuses (appel de puissance cumulé de 13 kW thermiques).
+  - [x] Décalage paramétrable (ex: `stagger_delay: "00:05:00"`) et compte à rebours en temps réel pour étaler les démarrages.
+- [x] **Support natif des Presets Home Assistant (`Comfort`, `Eco`, `Away`) :**
+  - [x] Déclaration des presets natifs `preset_modes: ["comfort", "eco", "away"]`.
+  - [x] Consignes dédiées `eco_temp` (défaut: 17.0°C) et `away_temp` (défaut: 15.0°C).
+  - [x] Bascule en 1 clic dans Lovelace sans écraser la consigne principale nominale.
 - [ ] **Optimisation tarifaire Heures Creuses (Linky TIC) :**
   - [ ] Allocation prioritaire du quota thermique journalier pendant les Heures Creuses nocturnes.
   - [ ] Modulation de la durée des cycles PWM (ex: cycles de 2h30 en HC vs cycles de 45 min en HP si besoin impérieux).
