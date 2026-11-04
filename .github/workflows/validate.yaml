@@ -29,7 +29,7 @@ jobs:
         uses: "hacs/action@main"
         with:
           category: "integration"
-          ignore: "brands"
+          ignore: "brands topics description"
 
   lint_and_test:
     name: Lint & Tests
