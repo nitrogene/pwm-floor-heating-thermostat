@@ -172,6 +172,10 @@ climate:
     power_watts: 6500.0
     slab_tau_hours: 15.0
     dead_time_hours: 2.25
+    
+    # Anti-Peak Tariff Quota Enforcement
+    enforce_daily_quota: true                              # Inhibit unnecessary Peak-Hour cycles once daily quota is fulfilled
+    enforce_daily_quota_sensor: input_boolean.enforce_daily_quota_living_room # Optional: toggle switch directly in Lovelace UI
 ```
 
 > [!NOTE]

@@ -31,6 +31,11 @@ CONF_MIN_CYCLE_DURATION = "min_cycle_duration"
 CONF_MIN_OFF_CYCLE_DURATION = "min_off_cycle_duration"
 CONF_MAX_CYCLES_PER_DAY = "max_cycles_per_day"
 
+# Plafonnement du budget énergétique journalier (Anti-Gaspillage Heures Pleines)
+CONF_ENFORCE_DAILY_QUOTA = "enforce_daily_quota"
+CONF_ENFORCE_DAILY_QUOTA_SENSOR = "enforce_daily_quota_sensor"
+DEFAULT_ENFORCE_DAILY_QUOTA = True
+
 # Valeurs par défaut
 DEFAULT_NAME = "PWM Floor Heating Thermostat"
 DEFAULT_TARGET_TEMP = 19.0

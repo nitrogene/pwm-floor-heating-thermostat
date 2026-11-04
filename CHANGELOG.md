@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-11-04
+
+### Added
+- **Dynamic Daily Quota Enforcement (Anti-Peak Tariff Protection)**:
+  - Added `enforce_daily_quota` (boolean, default: true) and `enforce_daily_quota_sensor` (`input_boolean` entity) configuration options.
+  - Automatically inhibits unnecessary compressor cycles in Peak hours (Heures Pleines) once the 24-hour heat quota has been fulfilled during cheap Off-Peak hours.
+  - Full UI override: toggle the switch directly from Lovelace dashboards (`maison.yaml`) without restarting Home Assistant.
+  - Absolute comfort fallback: safety override triggers heating if ambient temperature unexpectedly drops more than 0.8°C below setpoint.
+  - New telemetry attributes: `daily_quota_enforced`, `daily_quota_blocked`, `heating_hours_remaining_24h`.
+  - Real-time continuous tracking of active running cycles in `heating_hours_done_today`.
+
+---
+
 ## [0.1.3] - 2026-11-04
 
 ### Added

@@ -44,6 +44,8 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
+    CONF_ENFORCE_DAILY_QUOTA,
+    CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HEAT_LOSS,
     CONF_HEATER,
@@ -61,6 +63,7 @@ from .const import (
     CONF_TARGET_SENSOR,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
+    DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HEAT_LOSS,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
@@ -100,6 +103,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_MIN_CYCLE_DURATION, default=DEFAULT_MIN_CYCLE): cv.time_period,
         vol.Optional(CONF_MIN_OFF_CYCLE_DURATION, default=DEFAULT_MIN_OFF): cv.time_period,
         vol.Optional(CONF_MAX_CYCLES_PER_DAY, default=DEFAULT_MAX_CYCLES): vol.Coerce(int),
+        vol.Optional(CONF_ENFORCE_DAILY_QUOTA, default=DEFAULT_ENFORCE_DAILY_QUOTA): cv.boolean,
+        vol.Optional(CONF_ENFORCE_DAILY_QUOTA_SENSOR): cv.entity_id,
     }
 )
 
@@ -149,6 +154,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._min_cycle_duration = config[CONF_MIN_CYCLE_DURATION]
         self._min_off_duration = config[CONF_MIN_OFF_CYCLE_DURATION]
         self._max_cycles = config[CONF_MAX_CYCLES_PER_DAY]
+
+        # Plafonnement du budget thermique journalier (Anti-Gaspillage Heures Pleines)
+        self._enforce_daily_quota = config[CONF_ENFORCE_DAILY_QUOTA]
+        self._enforce_daily_quota_sensor = config.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)
+        self._quota_blocked = False
 
         # État courant
         self._cur_temp: float | None = None
@@ -232,6 +242,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self._enforce_daily_quota_sensor:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._enforce_daily_quota_sensor], self._async_quota_sensor_changed
+                )
+            )
+
         # Boucle d'évaluation périodique (toutes les minutes)
         self.async_on_remove(
             async_track_time_interval(
@@ -297,6 +314,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
+        quota_enforcement_active = self._enforce_daily_quota
+        if self._enforce_daily_quota_sensor:
+            st_q = self.hass.states.get(self._enforce_daily_quota_sensor)
+            if st_q and st_q.state not in ["unknown", "unavailable"]:
+                quota_enforcement_active = st_q.state == "on"
+
+        run_hours = self._total_heating_hours_today
+
         return {
             "dry_run": self._dry_run,
             "simulated_heater_state": self._simulated_heater_state,
@@ -314,7 +339,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "compressor_power_watts": self._power_watts,
             "energy_quota_24h_kwh": round(self._energy_needed_kwh, 2),
             "heating_hours_needed_24h": round(self._hours_needed_24h, 2),
-            "heating_hours_done_today": round(self._hours_run_today, 2),
+            "heating_hours_done_today": round(run_hours, 2),
+            "heating_hours_remaining_24h": round(max(0.0, self._hours_needed_24h - run_hours), 2),
+            "daily_quota_enforced": quota_enforcement_active,
+            "daily_quota_blocked": self._quota_blocked,
             "compressor_cycles_today": self._cycles_today,
             "min_cycle_lock_remaining_sec": min_on_rem,
             "min_off_lock_remaining_sec": min_off_rem,
@@ -390,6 +418,26 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._observed_heater,
                 new_state.state,
             )
+
+    @callback
+    def _async_quota_sensor_changed(self, event) -> None:
+        """Réaction dynamique immédiate au basculement de l'interrupteur de plafonnement UI."""
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            _LOGGER.debug(
+                "Interrupteur de plafonnement de quota journalier %s basculé sur %s",
+                self._enforce_daily_quota_sensor,
+                new_state.state,
+            )
+            self.hass.async_create_task(self._async_control_heating())
+
+    @property
+    def _total_heating_hours_today(self) -> float:
+        """Heures totales de chauffe cumulées aujourd'hui (incluant le cycle actif)."""
+        total = self._hours_run_today
+        if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL] and self._cycle_start_time:
+            total += (dt_util.utcnow() - self._cycle_start_time).total_seconds() / 3600.0
+        return total
 
     def _update_trajectory_projection(self, now: datetime) -> None:
         """Calcule la pente filtrée dT/dt (°C/h) et projette la température à t + theta."""
@@ -527,6 +575,26 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"Idle (stable trajectory: curr {self._cur_temp}°C, "
                     f"projected {round(self._temp_projected, 2)}°C in {self._dead_time}h)"
                 )
+
+            # Règle D : Plafonnement du Quota Journalier en Heures Pleines (Anti-Gaspillage)
+            quota_enforcement_active = self._enforce_daily_quota
+            if self._enforce_daily_quota_sensor:
+                st_q = self.hass.states.get(self._enforce_daily_quota_sensor)
+                if st_q and st_q.state not in ["unknown", "unavailable"]:
+                    quota_enforcement_active = st_q.state == "on"
+
+            run_hours = self._total_heating_hours_today
+            quota_exceeded = (self._hours_needed_24h > 0.0) and (run_hours >= self._hours_needed_24h)
+            self._quota_blocked = False
+
+            if should_heat and not off_peak_active and quota_enforcement_active and quota_exceeded:
+                if error < 0.8:
+                    should_heat = False
+                    self._quota_blocked = True
+                    self._decision_reason = (
+                        f"Daily quota fulfilled ({round(run_hours, 2)}h / {round(self._hours_needed_24h, 2)}h done). "
+                        f"Peak-hour cycle inhibited by quota enforcement (switch ON)."
+                    )
 
         # 5. Garde-fous plancher chauffant / boucle d'eau (si capteur configuré)
         if self._floor_temp is not None:
