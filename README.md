@@ -1,8 +1,8 @@
 # PWM Floor Heating Thermostat for Home Assistant
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/default)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/nitrogene/pwm-floor-heating-thermostat?include_prereleases)](https://github.com/nitrogene/pwm-floor-heating-thermostat/releases)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?logo=homeassistant&logoColor=white)](https://github.com/hacs/default)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/nitrogene/pwm-floor-heating-thermostat?logo=github&logoColor=white)](https://github.com/nitrogene/pwm-floor-heating-thermostat/releases)
 
 A predictive, thermodynamic underfloor heating thermostat for Home Assistant, engineered specifically for high thermal inertia heavy slabs (*chape liquide / dalle béton*) and on/off (TOR / *Tout-Ou-Rien*) heating devices: geothermal heat pumps, hydronic manifolds with water return sensors, electrothermal wax actuators, and pellet boilers.
 
