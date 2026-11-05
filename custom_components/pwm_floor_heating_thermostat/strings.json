@@ -1,4 +1,59 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "PWM Floor Heating Thermostat",
+        "description": "Configure a predictive thermodynamic floor heating thermostat.",
+        "data": {
+          "name": "Thermostat Name",
+          "target_sensor": "Ambient Temperature Sensor",
+          "outdoor_sensor": "Outdoor Temperature Sensor",
+          "heater": "Heater Switch / Actuator",
+          "off_peak_sensor": "Off-Peak Tariff Sensor (Linky TIC / HC)",
+          "dry_run": "Simulation / Shadow Mode (no physical switching)",
+          "observed_heater": "Observed Physical Heater (for Shadow Mode comparison)",
+          "heat_loss_wk": "Building Heat Loss Coefficient H (W/K)",
+          "power_watts": "Heater Thermal Power (W)",
+          "slab_tau_hours": "Thermal Slab Time Constant (hours)",
+          "dead_time_hours": "Slab Dead Time delay (hours)",
+          "floor_temp_sensor": "Floor / Water Loop Temperature Sensor"
+        }
+      }
+    },
+    "error": {
+      "missing_target_sensor": "An ambient temperature sensor is required.",
+      "missing_outdoor_sensor": "An outdoor temperature sensor is required."
+    },
+    "abort": {
+      "already_configured": "This thermostat or sensor is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Thermostat Options",
+        "description": "Tune thermodynamic model parameters and regulation features.",
+        "data": {
+          "dry_run": "Simulation / Shadow Mode",
+          "observed_heater": "Observed Physical Heater",
+          "heater": "Heater Switch / Actuator",
+          "heat_loss_wk": "Heat Loss Coefficient H (W/K)",
+          "power_watts": "Thermal Power (W)",
+          "slab_tau_hours": "Slab Time Constant (hours)",
+          "dead_time_hours": "Slab Dead Time (hours)",
+          "enforce_daily_quota": "Enforce Daily Energy Quota (Anti-Peak Hours)",
+          "window_detection": "Airstream / Open Window Detection",
+          "window_sensor": "Physical Window Contact Sensor",
+          "eco_temp": "Eco Preset Temperature (°C)",
+          "away_temp": "Away Preset Temperature (°C)",
+          "floor_temp_sensor": "Floor / Water Loop Temperature Sensor",
+          "max_floor_temp": "Max Floor Temperature Limit (°C)",
+          "min_floor_temp": "Floor Freeze Protection Limit (°C)",
+          "stagger_delay": "Multi-Zone Startup Stagger Delay (seconds)"
+        }
+      }
+    }
+  },
   "entity": {
     "climate": {
       "pwm_floor_heating_thermostat": {

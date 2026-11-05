@@ -108,5 +108,14 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
 - [x] **Traductions et métadonnées d'entités :**
   - [x] Fichier racine `strings.json`.
   - [x] Traductions complètes en anglais (`translations/en.json`) et en français (`translations/fr.json`).
-- [ ] **Config Flow (Interface UI Home Assistant) :**
-  - [ ] Implémenter `config_flow.py` pour permettre l'ajout du thermostat directement depuis l'interface graphique de Home Assistant (sans YAML obligatoire).
+- [x] **Config Flow & Options Flow (Interface UI Home Assistant) [Priorité 1] :**
+  - [x] Implémenter `config_flow.py` pour permettre l'ajout du thermostat directement depuis l'interface graphique de Home Assistant (*Paramètres* -> *Appareils et Services* -> *Ajouter une intégration*).
+  - [x] Implémenter l'assistant de réglages `OptionsFlow` pour modifier les paramètres à chaud (bascule *Shadow Mode (Simulation)* <-> *Mode Réel*, déperditions, temps mort) sans redémarrer Home Assistant.
+  - [x] Déclarer `"config_flow": true` dans `manifest.json`.
+  - [x] Compléter `strings.json` et les traductions `translations/fr.json` et `translations/en.json`.
+  - [x] Raccorder `async_setup_entry` et `async_unload_entry` dans `__init__.py` et `climate.py`.
+  - [x] Suite de tests unitaires automatisés dédiée (`tests/test_config_flow.py`).
+- [ ] **Publication dans le catalogue officiel HACS Default (PR sur hacs/default) [Priorité 2] :**
+  - [ ] Validation complète des critères HACS (validation Hassfest, HACS action, logos et métadonnées).
+  - [ ] Soumission de la Pull Request sur le dépôt officiel communautaire `hacs/default`.
+  - [ ] Indexation publique permettant la découverte et l'installation directe par la communauté sans saisir d'URL personnalisée.

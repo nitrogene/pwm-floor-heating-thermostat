@@ -1,4 +1,59 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Thermostat Plancher Chauffant PWM",
+        "description": "Configurer un thermostat prédictif et thermodynamique pour plancher chauffant.",
+        "data": {
+          "name": "Nom du thermostat",
+          "target_sensor": "Sonde de température ambiante (pièce)",
+          "outdoor_sensor": "Sonde de température extérieure",
+          "heater": "Actionneur / Relais de chauffe piloté",
+          "off_peak_sensor": "Capteur Heures Creuses (Linky TIC / HC)",
+          "dry_run": "Mode Simulation / Shadow Mode (aucun ordre physique)",
+          "observed_heater": "Actionneur physique observé (comparaison Shadow Mode)",
+          "heat_loss_wk": "Coefficient de déperdition thermique H (W/K)",
+          "power_watts": "Puissance thermique utile (W)",
+          "slab_tau_hours": "Constante de temps d'inertie de la dalle (heures)",
+          "dead_time_hours": "Temps mort de traversée de dalle (heures)",
+          "floor_temp_sensor": "Sonde de boucle d'eau / dalle (hydraulique)"
+        }
+      }
+    },
+    "error": {
+      "missing_target_sensor": "Une sonde de température ambiante est obligatoire.",
+      "missing_outdoor_sensor": "Une sonde de température extérieure est obligatoire."
+    },
+    "abort": {
+      "already_configured": "Ce thermostat ou cette sonde est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options du thermostat",
+        "description": "Ajuster les paramètres thermodynamiques et les fonctions de régulation.",
+        "data": {
+          "dry_run": "Mode simulation / Shadow Mode",
+          "observed_heater": "Actionneur physique observé",
+          "heater": "Actionneur / Relais de chauffe piloté",
+          "heat_loss_wk": "Déperditions thermiques H (W/K)",
+          "power_watts": "Puissance thermique utile (W)",
+          "slab_tau_hours": "Constante de temps de la dalle (heures)",
+          "dead_time_hours": "Temps mort de dalle (heures)",
+          "enforce_daily_quota": "Plafonner le quota énergétique journalier (Anti-HP)",
+          "window_detection": "Détection d'aération active",
+          "window_sensor": "Capteur d'ouverture de fenêtre",
+          "eco_temp": "Température consigne Eco (°C)",
+          "away_temp": "Température consigne Absence (°C)",
+          "floor_temp_sensor": "Sonde de boucle d'eau / dalle",
+          "max_floor_temp": "Plafond max température dalle (°C)",
+          "min_floor_temp": "Seuil hors-gel dalle (°C)",
+          "stagger_delay": "Délai de déphasage anti-pic de démarrage (secondes)"
+        }
+      }
+    }
+  },
   "entity": {
     "climate": {
       "pwm_floor_heating_thermostat": {

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.climate import (
@@ -26,6 +27,7 @@ from homeassistant.components.climate import (
     HVACAction,
     HVACMode,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_TEMPERATURE,
     CONF_NAME,
@@ -36,6 +38,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -93,6 +96,7 @@ from .const import (
     DEFAULT_WINDOW_DETECTION,
     DEFAULT_WINDOW_DROP_THRESHOLD,
     DEFAULT_WINDOW_TIMEOUT,
+    DOMAIN,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
     FSM_RUNNING_NORMAL,
@@ -136,14 +140,47 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     }
 )
 
+
+def _parse_timedelta(val: Any, default: timedelta) -> timedelta:
+    """Convertit une durée (chaîne, secondes, timedelta) en timedelta."""
+    if val is None:
+        return default
+    if isinstance(val, timedelta):
+        return val
+    if isinstance(val, (int, float)):
+        return timedelta(seconds=val)
+    if isinstance(val, str):
+        try:
+            return cv.time_period(val)
+        except Exception:
+            try:
+                return timedelta(seconds=float(val))
+            except Exception:
+                pass
+    return default
+
+
 async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
     async_add_entities: AddEntitiesCallback,
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
-    """Configuration de la plateforme PWM Floor Heating Thermostat."""
+    """Configuration de la plateforme PWM Floor Heating Thermostat (via YAML)."""
     async_add_entities([PwmFloorHeatingThermostat(hass, config)])
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Configuration de la plateforme PWM Floor Heating Thermostat (via UI Config Entry)."""
+    config = {**entry.data, **entry.options}
+    config[CONF_UNIQUE_ID] = entry.entry_id
+    if CONF_NAME not in config:
+        config[CONF_NAME] = entry.title
+    async_add_entities([PwmFloorHeatingThermostat(hass, config, entry=entry)])
 
 
 class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
@@ -155,46 +192,47 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_preset_modes = [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
 
-    def __init__(self, hass: HomeAssistant, config: ConfigType) -> None:
+    def __init__(self, hass: HomeAssistant, config: ConfigType, entry: ConfigEntry | None = None) -> None:
         """Initialisation de l'entité."""
         self.hass = hass
-        self._name = config[CONF_NAME]
+        self._entry = entry
+        self._name = config.get(CONF_NAME, DEFAULT_NAME)
         self._unique_id = config.get(CONF_UNIQUE_ID)
         self._heater_entity = config.get(CONF_HEATER)
         self._target_sensor = config[CONF_TARGET_SENSOR]
         self._outdoor_sensor = config[CONF_OUTDOOR_SENSOR]
         self._off_peak_sensor = config.get(CONF_OFF_PEAK_SENSOR) or config.get(CONF_HEURES_CREUSES_SENSOR)
-        self._dry_run = config[CONF_DRY_RUN]
+        self._dry_run = bool(config.get(CONF_DRY_RUN, DEFAULT_DRY_RUN))
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
 
         # Sonde de dalle / boucle d'eau (hydraulique)
         self._floor_temp_sensor = config.get(CONF_FLOOR_TEMP_SENSOR)
-        self._max_floor_temp = config[CONF_MAX_FLOOR_TEMP]
-        self._min_floor_temp = config[CONF_MIN_FLOOR_TEMP]
+        self._max_floor_temp = float(config.get(CONF_MAX_FLOOR_TEMP, DEFAULT_MAX_FLOOR_TEMP))
+        self._min_floor_temp = float(config.get(CONF_MIN_FLOOR_TEMP, DEFAULT_MIN_FLOOR_TEMP))
         self._floor_temp: float | None = None
 
         # Paramètres thermodynamiques
-        self._heat_loss = config[CONF_HEAT_LOSS]
-        self._power_watts = config[CONF_POWER_WATTS]
-        self._slab_tau = config[CONF_SLAB_TIME_CONSTANT]
-        self._dead_time = config[CONF_DEAD_TIME]
+        self._heat_loss = float(config.get(CONF_HEAT_LOSS, DEFAULT_HEAT_LOSS))
+        self._power_watts = float(config.get(CONF_POWER_WATTS, DEFAULT_POWER_WATTS))
+        self._slab_tau = float(config.get(CONF_SLAB_TIME_CONSTANT, DEFAULT_SLAB_TAU_HOURS))
+        self._dead_time = float(config.get(CONF_DEAD_TIME, DEFAULT_DEAD_TIME_HOURS))
 
         # Sécurités Danfoss
-        self._min_cycle_duration = config[CONF_MIN_CYCLE_DURATION]
-        self._min_off_duration = config[CONF_MIN_OFF_CYCLE_DURATION]
-        self._max_cycles = config[CONF_MAX_CYCLES_PER_DAY]
+        self._min_cycle_duration = _parse_timedelta(config.get(CONF_MIN_CYCLE_DURATION), DEFAULT_MIN_CYCLE)
+        self._min_off_duration = _parse_timedelta(config.get(CONF_MIN_OFF_CYCLE_DURATION), DEFAULT_MIN_OFF)
+        self._max_cycles = int(config.get(CONF_MAX_CYCLES_PER_DAY, DEFAULT_MAX_CYCLES))
 
         # Plafonnement du budget thermique journalier (Anti-Gaspillage Heures Pleines)
-        self._enforce_daily_quota = config[CONF_ENFORCE_DAILY_QUOTA]
+        self._enforce_daily_quota = bool(config.get(CONF_ENFORCE_DAILY_QUOTA, DEFAULT_ENFORCE_DAILY_QUOTA))
         self._enforce_daily_quota_sensor = config.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)
         self._quota_blocked = False
 
         # Détection d'aération / Fenêtre ouverte
-        self._window_detection_enabled = config[CONF_WINDOW_DETECTION]
+        self._window_detection_enabled = bool(config.get(CONF_WINDOW_DETECTION, DEFAULT_WINDOW_DETECTION))
         self._window_detection_sensor = config.get(CONF_WINDOW_DETECTION_SENSOR)
         self._window_sensor = config.get(CONF_WINDOW_SENSOR)
-        self._window_drop_threshold = config[CONF_WINDOW_DROP_THRESHOLD]
-        self._window_timeout = config[CONF_WINDOW_TIMEOUT]
+        self._window_drop_threshold = float(config.get(CONF_WINDOW_DROP_THRESHOLD, DEFAULT_WINDOW_DROP_THRESHOLD))
+        self._window_timeout = _parse_timedelta(config.get(CONF_WINDOW_TIMEOUT), DEFAULT_WINDOW_TIMEOUT)
         self._window_open = False
         self._window_open_time: datetime | None = None
 
@@ -203,13 +241,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._heat_loss_samples_count: int = 0
 
         # Presets de température
-        self._eco_temp = config[CONF_ECO_TEMP]
-        self._away_temp = config[CONF_AWAY_TEMP]
-        self._comfort_temp = config.get(CONF_COMFORT_TEMP, DEFAULT_TARGET_TEMP)
+        self._eco_temp = float(config.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP))
+        self._away_temp = float(config.get(CONF_AWAY_TEMP, DEFAULT_AWAY_TEMP))
+        self._comfort_temp = float(config.get(CONF_COMFORT_TEMP, DEFAULT_TARGET_TEMP))
         self._preset_mode: str = PRESET_COMFORT
 
         # Coordination Multi-Zones & Déphasage Anti-Pic de démarrage
-        self._stagger_delay = config[CONF_STAGGER_DELAY]
+        self._stagger_delay = _parse_timedelta(config.get(CONF_STAGGER_DELAY), DEFAULT_STAGGER_DELAY)
         self._demand_start_time: datetime | None = None
 
         # État courant
@@ -350,6 +388,19 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     def unique_id(self) -> str | None:
         """Identifiant unique de l'entité."""
         return self._unique_id
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Informations sur l'appareil pour Home Assistant."""
+        if self._unique_id:
+            return DeviceInfo(
+                identifiers={(DOMAIN, self._unique_id)},
+                name=self._name,
+                manufacturer="Nitrogene",
+                model="PWM Thermodynamic Underfloor Thermostat",
+                sw_version="0.2.0",
+            )
+        return None
 
     @property
     def name(self) -> str:

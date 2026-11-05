@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-11-05
+
+### Added
+- **Native Home Assistant Config Flow (`config_flow.py`)**:
+  - Full UI setup support: Add thermostats directly via *Settings -> Devices & Services -> Add Integration*.
+  - Guided form validating required temperature sensors (`target_sensor`, `outdoor_sensor`), physical/virtual actuators (`heater`), off-peak tariff sensor, floor slab sensor, and core thermodynamic parameters ($H$, $P$, $\tau$, $\theta$).
+  - Automatic predictable `unique_id` assignment preventing duplicate thermostat instances.
+- **Dynamic Options Flow**:
+  - Realtime parameter tuning without restarting Home Assistant (*Settings -> Devices & Services -> Configure*).
+  - Instant toggle between *Shadow Mode (Simulation)* and *Active Physical Control* (`dry_run`).
+  - Runtime calibration of building heat loss ($H$ in W/K), slab dead time ($\theta$), slab time constant ($\tau$), daily quota enforcement, open window detection, and floor temperature DTU limits.
+  - Automatic entity reload with seamless state restoration via `RestoreEntity`.
+- **Integration Device Registry**:
+  - Exposes dedicated Home Assistant Device cards bound to `pwm_floor_heating_thermostat` (`Nitrogene` - `PWM Thermodynamic Underfloor Thermostat`).
+- **Translations & Hassfest Compliance**:
+  - Full localization in French (`translations/fr.json`) and English (`strings.json`, `translations/en.json`).
+  - Comprehensive unit test suite (`tests/test_config_flow.py`) validating user flow, duplicate aborts, options updates, and platform delegation (35 automated unit tests passing).
+
+---
+
 ## [0.1.6] - 2026-11-04
 
 ### Added
