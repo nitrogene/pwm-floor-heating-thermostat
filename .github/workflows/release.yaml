@@ -12,8 +12,13 @@ on:
         default: 'v0.1.3'
 
 jobs:
+  validate:
+    name: Validate Quality & Tests
+    uses: ./.github/workflows/validate.yaml
+
   release:
     name: Create GitHub Release
+    needs: [validate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
