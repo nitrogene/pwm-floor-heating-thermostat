@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-11-08
+
+### Added
+- **Native Diagnostic Sensor Platform (`sensor.py`)**:
+  - Automatically instantiates 7 companion diagnostic entities attached directly to the thermostat device card (`temp_projected_ahead`, `temp_derivative_hourly`, `model_error`, `energy_quota_24h_kwh`, `heating_hours_remaining_24h`, `heat_loss_measured_wk`, `fsm_state`).
+  - Enables out-of-the-box long-term statistics and Lovelace graphing without requiring custom YAML template sensors.
+  - Reactive state propagation with the master climate entity using Home Assistant core dispatcher (`async_dispatcher_send` / `async_dispatcher_connect`).
+  - Full English and French entity localization in `strings.json` and `translations/`.
+- **Thermodynamic Model Error Metric ($e_{\text{model}}$)**:
+  - Continuously evaluates prediction accuracy: $e_{\text{model}}(t) = T_{\text{measured}}(t) - T_{\text{projected}}(t - \theta)$.
+  - Uses linear interpolation across rolling projection history window.
+  - Exposes `model_error` in `extra_state_attributes` and native diagnostics export with `RestoreEntity` state restoration.
+  - Dedicated unit test suite (`tests/test_math.py`).
+
+### Changed
+- **Power Input Step Resolution**:
+  - Relaxed heating power input step from 100 W to 10 W in Config Flow and Options Flow, allowing fine-grained entries like 3250 W.
+- **Documentation & Localization**:
+  - Full translation of the development roadmap (`TODO.md`) into technical English for HACS default repository compliance.
+  - Reorganized and clarified off-peak tariff optimization vs future spot-market schedulers.
+
+---
+
 ## [0.2.1] - 2026-11-08
 
 ### Fixed

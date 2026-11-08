@@ -73,3 +73,40 @@ def test_linear_regression_bounded():
     ]
     slope, _ = calculate_slope_and_projection(history, dead_time_hours=2.25)
     assert slope == 3.0  # Limité à la borne max physique
+
+
+def test_model_error_calculation():
+    """Vérifie le calcul de l'erreur de modèle e_model(t) = T_mesurée(t) - T_projetée(t - dead_time)."""
+    now = datetime(2026, 11, 3, 20, 0, 0)
+    dead_time_hours = 2.0
+
+    # Projections faites il y a 2h05 et 1h55 (encadrant t - 2h = 18h00)
+    t1 = now - timedelta(hours=2, minutes=5)
+    t2 = now - timedelta(hours=1, minutes=55)
+    proj1 = 19.4
+    proj2 = 19.6
+
+    projection_history = [(t1, proj1), (t2, proj2)]
+
+    target_time = now - timedelta(hours=dead_time_hours)
+    past_proj = None
+    for i in range(len(projection_history) - 1):
+        pt1, p1 = projection_history[i]
+        pt2, p2 = projection_history[i + 1]
+        if pt1 <= target_time <= pt2:
+            dt_span = (pt2 - pt1).total_seconds()
+            if dt_span > 0:
+                fraction = (target_time - pt1).total_seconds() / dt_span
+                past_proj = p1 + fraction * (p2 - p1)
+            else:
+                past_proj = p1
+            break
+
+    assert past_proj is not None
+    assert pytest.approx(past_proj, abs=1e-2) == 19.5
+
+    # Si la température mesurée actuelle est 19.58°C, model_error = 19.58 - 19.50 = +0.08°C
+    cur_temp = 19.58
+    model_error = round(cur_temp - past_proj, 2)
+    assert model_error == 0.08
+

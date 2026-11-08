@@ -47,6 +47,7 @@ async def async_get_config_entry_diagnostics(
             "decision_reason": getattr(thermostat, "_decision_reason", None),
             "temp_derivative_hourly": getattr(thermostat, "_temp_derivative_hourly", None),
             "temp_projected_ahead": getattr(thermostat, "_temp_projected_ahead", None),
+            "model_error": getattr(thermostat, "_model_error", None),
             "heat_loss_factor_wk": getattr(thermostat, "_heat_loss", None),
             "compressor_power_watts": getattr(thermostat, "_power_watts", None),
             "energy_quota_24h_kwh": getattr(thermostat, "_energy_quota_24h_kwh", None),

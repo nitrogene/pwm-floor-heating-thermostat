@@ -1,7 +1,9 @@
 """Configuration pytest pour pwm_floor_heating_thermostat."""
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 # Ajouter les chemins à sys.path
@@ -23,9 +25,11 @@ ha_modules = [
     "homeassistant.helpers.typing",
     "homeassistant.helpers.selector",
     "homeassistant.helpers.device_registry",
+    "homeassistant.helpers.dispatcher",
     "homeassistant.components",
     "homeassistant.components.climate",
     "homeassistant.components.diagnostics",
+    "homeassistant.components.sensor",
     "homeassistant.config_entries",
     "homeassistant.data_entry_flow",
     "homeassistant.util",
@@ -70,12 +74,30 @@ class MockEntity:
     def __init__(self, *args, **kwargs):
         pass
 
+    @property
+    def unique_id(self) -> str | None:
+        return getattr(self, "_attr_unique_id", None)
+
+    @property
+    def has_entity_name(self) -> bool:
+        return getattr(self, "_attr_has_entity_name", False)
+
     def async_on_remove(self, func):
+        pass
+
+    async def async_added_to_hass(self):
+        pass
+
+    def async_write_ha_state(self):
         pass
 
 
 class MockClimateEntity(MockEntity):
     """Mock ClimateEntity."""
+
+
+class MockSensorEntity(MockEntity):
+    """Mock SensorEntity."""
 
 
 class MockRestoreEntity(MockEntity):
@@ -86,6 +108,7 @@ class MockRestoreEntity(MockEntity):
 
 
 import homeassistant.components.climate as climate_mod  # noqa: E402
+import homeassistant.components.sensor as sensor_mod  # noqa: E402
 import homeassistant.helpers.restore_state as restore_mod  # noqa: E402
 
 climate_mod.ClimateEntity = MockClimateEntity
@@ -106,6 +129,30 @@ climate_mod.PRESET_COMFORT = "comfort"
 climate_mod.PRESET_ECO = "eco"
 climate_mod.PRESET_NONE = "none"
 
+
+@dataclass(frozen=True, kw_only=True)
+class MockSensorEntityDescription:
+    """Mock SensorEntityDescription."""
+
+    key: str
+    device_class: Any = None
+    state_class: Any = None
+    entity_category: Any = None
+    native_unit_of_measurement: str | None = None
+    translation_key: str | None = None
+    options: list[str] | None = None
+
+
+sensor_mod.SensorEntity = MockSensorEntity
+sensor_mod.SensorEntityDescription = MockSensorEntityDescription
+sensor_mod.SensorDeviceClass = MagicMock()
+sensor_mod.SensorDeviceClass.TEMPERATURE = "temperature"
+sensor_mod.SensorDeviceClass.ENERGY = "energy"
+sensor_mod.SensorDeviceClass.DURATION = "duration"
+sensor_mod.SensorDeviceClass.ENUM = "enum"
+sensor_mod.SensorStateClass = MagicMock()
+sensor_mod.SensorStateClass.MEASUREMENT = "measurement"
+
 restore_mod.RestoreEntity = MockRestoreEntity
 
 # Constantes et types standard Home Assistant
@@ -113,6 +160,9 @@ import homeassistant.const as ha_const  # noqa: E402
 
 ha_const.Platform = MagicMock()
 ha_const.Platform.CLIMATE = "climate"
+ha_const.Platform.SENSOR = "sensor"
+ha_const.EntityCategory = MagicMock()
+ha_const.EntityCategory.DIAGNOSTIC = "diagnostic"
 ha_const.CONF_NAME = "name"
 ha_const.CONF_UNIQUE_ID = "unique_id"
 ha_const.ATTR_TEMPERATURE = "temperature"
@@ -120,6 +170,10 @@ ha_const.EVENT_HOMEASSISTANT_START = "homeassistant_start"
 ha_const.PRECISION_TENTHS = 0.1
 ha_const.UnitOfTemperature = MagicMock()
 ha_const.UnitOfTemperature.CELSIUS = "°C"
+ha_const.UnitOfEnergy = MagicMock()
+ha_const.UnitOfEnergy.KILO_WATT_HOUR = "kWh"
+ha_const.UnitOfTime = MagicMock()
+ha_const.UnitOfTime.HOURS = "h"
 
 # Sélecteurs Home Assistant
 import homeassistant.helpers.selector as selector  # noqa: E402

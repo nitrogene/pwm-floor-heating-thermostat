@@ -60,9 +60,14 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
   - [x] Registered native presets `preset_modes: ["comfort", "eco", "away"]`.
   - [x] Dedicated setpoints `eco_temp` (default: 17.0°C) and `away_temp` (default: 15.0°C).
   - [x] 1-click preset switching in Lovelace without losing nominal comfort setpoint.
-- [ ] **Off-Peak Tariff Optimization (Linky TIC / Dynamic Tariffs):**
-  - [ ] Priority daily energy quota allocation during cheap nighttime Off-Peak hours.
-  - [ ] PWM cycle length modulation (e.g. 2h30 deep cycles during Off-Peak vs 45 min top-up cycles in Peak hours if needed).
+- [x] **Core Off-Peak Tariff Optimization & Anti-Peak Protection (Linky TIC):**
+  - [x] Realtime Linky TIC integration via `off_peak_sensor` (`binary_sensor.heures_creuses_nuit`).
+  - [x] Daily energy quota enforcement: blocks unnecessary Peak-Hour cycles once the daily thermal requirement is fulfilled.
+  - [x] Startup inrush staggering (`stagger_delay`) preventing 13 kW simultaneous power surges.
+  - [x] Absolute comfort fallback override (forces startup if setpoint deficit $\ge 0.8$°C).
+- [ ] **Advanced Dynamic Tariffs & Multi-Rate Schedulers (Future Roadmap):**
+  - [ ] Dynamic hourly spot-market tariff integration (EPEX Spot, NordPool, French EDF Tempo 6-color matrix).
+  - [ ] Adaptive PWM period modulation (e.g. 3h deep accumulation cycles in Off-Peak vs 45 min top-up cycles in Peak hours).
 - [ ] **Slow Drift Ambient Supervisor (Anti-Integral Windup):**
   - [ ] Gentle and bounded proportional trim on the 24h daily energy quota.
   - [ ] Permanent elimination of continuous divergent integrator windup.
@@ -71,27 +76,31 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
 
 ## 3. Advanced Telemetry & Debug Data for AI Calibration (Auto-Tuning)
 
-- [ ] **Model Error Metric ($e_{\text{model}}$):**
-  - [ ] Log $e_{\text{model}}(t) = T_{\text{measured}}(t) - T_{\text{projected}}(t - \theta)$ allowing AI agents to instantly evaluate heat loss $H$ estimation error or $\theta$ phase lag.
-- [ ] **Internal Physical Model Variables Telemetry:**
-  - [ ] `temp_projected_ahead`: Anticipated temperature at $t + \theta$ (°C).
-  - [ ] `temp_derivative_hourly`: Filtered derivative $dT/dt$ (°C/h).
-  - [ ] `estimated_slab_energy_kwh`: Estimated thermal energy stored inside the slab (kWh).
-  - [ ] `daily_energy_quota_kwh`: Required 24h thermal quota calculated from weather forecast.
-  - [ ] `energy_delivered_today_kwh`: Useful thermal energy delivered since midnight.
-  - [ ] `duty_cycle_continuous`: Theoretical requested PWM duty cycle (0 to 100%).
-- [ ] **Identification Slopes Extraction (Continuous Learning Dataset):**
-  - [ ] `unheated_cooling_rate`: Passive cooling decay rate (°C/h) identifying $H / C_{\text{slab}}$.
-  - [ ] `active_heating_rate`: Active heating rise rate (°C/h) identifying $P_{\text{watts}} / C_{\text{slab}}$.
-  - [ ] `outdoor_delta_avg`: Average indoor/outdoor temperature delta ($\Delta T_{\text{int-ext}}$).
-- [ ] **FSM Instrumentation & Diagnostics:**
-  - [ ] `fsm_state` (`idle`, `running_min_lock`, `running_normal`, `waiting_min_off`).
-  - [ ] `current_cycle_elapsed_min` and `current_cycle_target_min`.
-  - [ ] `cycles_count_today` and `max_cycles_budget`.
-  - [ ] `time_to_next_allowed_start` (pressure equalization 15 min countdown).
-- [ ] **Home Assistant Exposure Architecture:**
-  - [ ] All indicators fully exposed in `extra_state_attributes` of the Climate entity.
-  - [ ] Support for an optional `debug: true` flag automatically registering dedicated `sensor.<name>_*` entities (native SQLite / InfluxDB recording without external YAML templates).
+- [x] **Internal Physical Model Variables Telemetry (Exposed in `extra_state_attributes`):**
+  - [x] `temp_projected_ahead`: Anticipated temperature at $t + \theta$ (°C).
+  - [x] `temp_derivative_hourly`: Filtered derivative $dT/dt$ (°C/h).
+  - [x] `daily_energy_quota_kwh`: Required 24h thermal quota calculated from weather forecast (`energy_quota_24h_kwh`).
+  - [x] `heating_hours_needed_24h`, `heating_hours_done_today`, `heating_hours_remaining_24h`: Realtime compressor hour budget accounting.
+  - [x] `duty_cycle_continuous`: Continuous theoretical requested duty ratio.
+  - [x] `heat_loss_factor_wk`: Active building heat loss coefficient.
+- [x] **FSM Instrumentation & Diagnostics (Exposed in `extra_state_attributes`):**
+  - [x] `fsm_state` (`idle`, `running_min_lock`, `running_normal`, `waiting_min_off`).
+  - [x] `cycles_count_today` and `max_cycles_budget` (`compressor_cycles_today`).
+  - [x] `time_to_next_allowed_start` (`min_off_lock_remaining_sec` pressure equalization countdown).
+  - [x] `min_cycle_lock_remaining_sec`: Mandatory oil return countdown.
+- [x] **Passive Identification & Self-Learning Telemetry:**
+  - [x] `heat_loss_measured_wk`: Passive unheated decay rate identification (Mode A).
+  - [x] `heat_loss_samples_count`: Validated night decay measurement count.
+- [x] **Model Error Metric ($e_{\text{model}}$):**
+  - [x] Realtime evaluation: $e_{\text{model}}(t) = T_{\text{measured}}(t) - T_{\text{projected}}(t - \theta)$ exposed in `model_error` attribute.
+  - [x] Linear interpolation across rolling projection history window.
+  - [x] State restoration across Home Assistant reboots via `RestoreEntity`.
+  - [x] Unit tested calculation (`tests/test_math.py`).
+- [x] **Automated Companion Diagnostic Sensors (`sensor` Platform):**
+  - [x] Dedicated `sensor.py` platform registering 7 companion diagnostic entities attached to the Device card.
+  - [x] Native Home Assistant SQLite / InfluxDB recording and graphing without external YAML template sensors.
+  - [x] Instant reactive dispatcher synchronization upon thermostat state updates (`async_dispatcher_connect`).
+  - [x] English and French localized translation keys.
 
 ---
 

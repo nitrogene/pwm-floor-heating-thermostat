@@ -55,6 +55,35 @@
     }
   },
   "entity": {
+    "sensor": {
+      "temp_projected_ahead": {
+        "name": "Projected temperature"
+      },
+      "temp_derivative_hourly": {
+        "name": "Hourly temperature derivative"
+      },
+      "model_error": {
+        "name": "Thermodynamic model error"
+      },
+      "energy_quota_24h_kwh": {
+        "name": "24h energy quota"
+      },
+      "heating_hours_remaining_24h": {
+        "name": "Remaining heating hours"
+      },
+      "heat_loss_measured_wk": {
+        "name": "Measured heat loss (Mode A)"
+      },
+      "fsm_state": {
+        "name": "Danfoss FSM state",
+        "state": {
+          "idle": "Idle",
+          "running_min_lock": "Running (oil return lock)",
+          "running_normal": "Running",
+          "waiting_min_off": "Pressure equalization"
+        }
+      }
+    },
     "climate": {
       "pwm_floor_heating_thermostat": {
         "state_attributes": {

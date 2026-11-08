@@ -39,6 +39,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -271,6 +272,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._temp_history: list[tuple[datetime, float]] = []
         self._temp_derivative: float = 0.0
         self._temp_projected: float = DEFAULT_TARGET_TEMP
+        self._projection_history: list[tuple[datetime, float]] = []
+        self._model_error: float | None = None
 
         # Télémétrie et simulation
         self._simulated_heater_state = False
@@ -304,6 +307,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if "heat_loss_measured_wk" in old_attrs and old_attrs["heat_loss_measured_wk"] is not None:
                 try:
                     self._heat_loss_measured_wk = float(old_attrs["heat_loss_measured_wk"])
+                except (ValueError, TypeError):
+                    pass
+            if "model_error" in old_attrs and old_attrs["model_error"] is not None:
+                try:
+                    self._model_error = float(old_attrs["model_error"])
                 except (ValueError, TypeError):
                     pass
             if old_preset := old_attrs.get("preset_mode"):
@@ -400,7 +408,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.1",
+                sw_version="0.2.2",
             )
         return None
 
@@ -408,6 +416,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     def name(self) -> str:
         """Nom de l'entité."""
         return self._name
+
+    @callback
+    def async_write_ha_state(self) -> None:
+        """Écrit l'état et notifie les capteurs compagnons via dispatcher."""
+        super().async_write_ha_state()
+        if self._entry and hasattr(self, "hass") and self.hass:
+            async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
 
     @property
     def current_temperature(self) -> float | None:
@@ -506,6 +521,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "dead_time_hours": self._dead_time,
             "temp_derivative_hourly": round(self._temp_derivative, 3),
             "temp_projected_ahead": round(self._temp_projected, 2),
+            "model_error": self._model_error,
             "heat_loss_factor_wk": self._heat_loss,
             "compressor_power_watts": self._power_watts,
             "energy_quota_24h_kwh": round(self._energy_needed_kwh, 2),
@@ -684,6 +700,31 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         # Trajectoire projetée à t + theta
         self._temp_projected = self._cur_temp + (self._dead_time * self._temp_derivative)
+
+        # Mémorisation de la projection pour le calcul de l'erreur de modèle e_model
+        self._projection_history.append((now, self._temp_projected))
+
+        # Élagage de l'historique des projections (conserve jusqu'à 2 * dead_time + 1h)
+        cutoff_proj = now - timedelta(hours=max(4.0, (self._dead_time * 2.0) + 1.0))
+        self._projection_history = [(t, v) for t, v in self._projection_history if t >= cutoff_proj]
+
+        # Calcul de model_error : e_model(t) = T_measured(t) - T_projected(t - theta)
+        target_time = now - timedelta(hours=self._dead_time)
+        past_proj: float | None = None
+        for i in range(len(self._projection_history) - 1):
+            t1, p1 = self._projection_history[i]
+            t2, p2 = self._projection_history[i + 1]
+            if t1 <= target_time <= t2:
+                dt_span = (t2 - t1).total_seconds()
+                if dt_span > 0:
+                    fraction = (target_time - t1).total_seconds() / dt_span
+                    past_proj = p1 + fraction * (p2 - p1)
+                else:
+                    past_proj = p1
+                break
+
+        if past_proj is not None:
+            self._model_error = round(self._cur_temp - past_proj, 2)
 
     def _async_read_sensors(self) -> None:
         """Lecture synchronisée des états actuels."""
