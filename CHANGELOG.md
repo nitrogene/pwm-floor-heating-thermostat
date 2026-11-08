@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-11-08
+
+### Fixed
+- **Options Flow 500 Error Fix**:
+  - Resolved `AttributeError: property 'config_entry' of 'OptionsFlowHandler' object has no setter` on Home Assistant 2024.4+ when accessing integration options via the gear icon ⚙️.
+  - Implemented safe internal `_config_entry` encapsulation with fallback property accessor.
+
+### Added
+- **Native Diagnostics Platform (`diagnostics.py`)**:
+  - Full support for Home Assistant's native "Download diagnostics" button (*Settings -> Devices & Services -> PWM Floor Heating Thermostat -> Download diagnostics*).
+  - Generates a sanitized JSON export of entry data, options, live climate entity state, thermodynamic model attributes, Danfoss FSM state, and telemetry with sensitive tokens automatically redacted.
+  - Dedicated unit tests (`tests/test_diagnostics.py`).
+- **Standardized GitHub Issue Templates**:
+  - Added structured `.github/ISSUE_TEMPLATE/bug_report.yml` prompting for HA version, integration version, heating architecture, diagnostics file attachment, and debug logs.
+  - Added `.github/ISSUE_TEMPLATE/feature_request.yml`.
+- **Documentation & Visual Setup Guide**:
+  - Added step-by-step UI installation and configuration screenshots to `README.md`.
+  - Added detailed Troubleshooting, Debug Logging (`logger:`), and Diagnostics export section.
+
+---
+
 ## [0.2.0] - 2026-11-05
 
 ### Added

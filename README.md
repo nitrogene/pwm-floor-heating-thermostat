@@ -89,13 +89,50 @@ The slab acts as a physical low-pass thermal filter. The outdoor temperature tha
 3. Add `https://github.com/nitrogene/pwm-floor-heating-thermostat` as an **Integration**.
 4. Click **Download**, then restart Home Assistant.
 
+![HACS Download](images/marketplace_install.png)
+
 ### Manual Installation
 
 Copy all files into `<home_assistant_config>/custom_components/pwm_floor_heating_thermostat/` and restart Home Assistant.
 
 ---
 
-## Configuration Examples
+## Configuration via User Interface (Config Flow)
+
+Setting up your thermostat is fully supported directly in the Home Assistant UI without writing any YAML:
+
+1. Navigate to **Settings** -> **Devices & Services** -> **Add Integration**.
+2. Search for **PWM Floor Heating Thermostat**.
+3. **Step 1 - Entity Mapping:** Name your thermostat and select your ambient sensor, outdoor sensor (or forecast sensor), heating actuator relay, and optional off-peak tariff sensor:
+
+| Initial Selection | Filled Form |
+| :---: | :---: |
+| ![Config Flow Step 1](images/config_flow_step1.png) | ![Config Flow Filled Step 1](images/config_flow_filled_step1.png) |
+
+4. **Step 2 - Thermodynamic Parameters:** Enter the heat loss coefficient $H$, heating output $P$, slab time constant $\tau$, and dead time $\theta$:
+
+| Parameters Form | Configured Parameters |
+| :---: | :---: |
+| ![Config Flow Parameters](images/config_flow_parameters.png) | ![Config Flow Parameters Filled](images/config_flow_parameters_filled.png) |
+
+5. **Step 3 - Device Registry:** Assign the thermostat to an area. A dedicated Home Assistant device card and climate entity are instantly created:
+
+| Device Registration | Device Card Overview |
+| :---: | :---: |
+| ![Device Registration](images/device_registry_success.png) | ![Device Card](images/device_card.png) |
+
+![Integration Hub](images/integration_hub.png)
+
+---
+
+## Dynamic Options Flow (Runtime Tuning)
+
+You can recalibrate any thermodynamic parameter or toggle between **Shadow Mode** and **Live Physical Control** at any time without restarting Home Assistant:
+- Navigate to **Settings** -> **Devices & Services** -> **PWM Floor Heating Thermostat** -> click the **Configure** (gear icon ⚙️) button.
+
+---
+
+## YAML Configuration Examples (Alternative)
 
 ### 1. Geothermal Heat Pump (Direct Expansion / TOR Compressors)
 
@@ -192,6 +229,36 @@ climate:
 
 > [!NOTE]
 > **French Linky TIC users:** For backward compatibility, `heures_creuses_sensor` can be used as a direct alias for `off_peak_sensor` (e.g. `heures_creuses_sensor: binary_sensor.heures_creuses_nuit`).
+
+---
+
+## Troubleshooting & Diagnostics
+
+### 1. Enabling Debug Logs
+
+To view detailed cycle scheduling decisions, thermodynamic calculations, and FSM transitions, enable debug logging in your Home Assistant `configuration.yaml`:
+
+```yaml
+logger:
+  default: info
+  logs:
+    custom_components.pwm_floor_heating_thermostat: debug
+```
+
+After updating `configuration.yaml`, reload the logger configuration or restart Home Assistant.
+
+### 2. Downloading Diagnostics (Sanitized)
+
+If you encounter unexpected regulation behavior or wish to share your model state for assistance:
+1. Navigate to **Settings** -> **Devices & Services** -> **PWM Floor Heating Thermostat**.
+2. Click on your thermostat device (or the three dots next to the entry) and select **Download diagnostics**.
+3. Home Assistant will export a sanitized JSON file containing entry configuration, live model attributes, Danfoss FSM timers, and telemetry metrics (all passwords, tokens, and sensitive keys are automatically redacted).
+
+### 3. Filing an Issue
+
+If you find a bug or have a feature request:
+- Open an issue on GitHub: [Submit an Issue](https://github.com/nitrogene/pwm-floor-heating-thermostat/issues/new/choose).
+- Use the **Bug Report** template and attach your sanitized `diagnostics.json` along with relevant debug log extracts.
 
 ---
 

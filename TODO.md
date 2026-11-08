@@ -111,11 +111,16 @@ Ce document retrace la feuille de route, les spécifications algorithmiques et l
 - [x] **Config Flow & Options Flow (Interface UI Home Assistant) [Priorité 1] :**
   - [x] Implémenter `config_flow.py` pour permettre l'ajout du thermostat directement depuis l'interface graphique de Home Assistant (*Paramètres* -> *Appareils et Services* -> *Ajouter une intégration*).
   - [x] Implémenter l'assistant de réglages `OptionsFlow` pour modifier les paramètres à chaud (bascule *Shadow Mode (Simulation)* <-> *Mode Réel*, déperditions, temps mort) sans redémarrer Home Assistant.
+  - [x] Résolution de l'erreur 500 sur l'Options Flow pour Home Assistant 2024.4+ (encapsulation propre `_config_entry`).
+  - [x] Implémentation de la plateforme native de diagnostic `diagnostics.py` ("Télécharger les diagnostics").
+  - [x] Création des gabarits d'issues GitHub (`.github/ISSUE_TEMPLATE/bug_report.yml`, `feature_request.yml`).
   - [x] Déclarer `"config_flow": true` dans `manifest.json`.
   - [x] Compléter `strings.json` et les traductions `translations/fr.json` et `translations/en.json`.
   - [x] Raccorder `async_setup_entry` et `async_unload_entry` dans `__init__.py` et `climate.py`.
-  - [x] Suite de tests unitaires automatisés dédiée (`tests/test_config_flow.py`).
+  - [x] Suite de tests unitaires automatisés dédiée (`tests/test_config_flow.py`, `tests/test_diagnostics.py`).
 - [ ] **Publication dans le catalogue officiel HACS Default (PR sur hacs/default) [Priorité 2] :**
-  - [ ] Validation complète des critères HACS (validation Hassfest, HACS action, logos et métadonnées).
-  - [ ] Soumission de la Pull Request sur le dépôt officiel communautaire `hacs/default`.
-  - [ ] Indexation publique permettant la découverte et l'installation directe par la communauté sans saisir d'URL personnalisée.
+  - [ ] **Soak test & collecte de données terrain (48h) :** Suivi continu de la télémétrie Shadow Mode, convergence de l'auto-calibrage des déperditions ($H$).
+  - [x] **Captures d'écran du parcours UI :** Installation Marketplace, Config Flow étape par étape, cartes appareils et intégration pour la documentation (`README.md`).
+  - [ ] **Validation finale des critères HACS :** Validation Hassfest, HACS action, logos et métadonnées.
+  - [ ] **Soumission de la Pull Request :** Dépôt de la PR sur le dépôt officiel communautaire `hacs/default`.
+  - [ ] **Indexation publique :** Découverte et installation directe en 1 clic par la communauté HACS.

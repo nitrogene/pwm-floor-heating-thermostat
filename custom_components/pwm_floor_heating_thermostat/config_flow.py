@@ -159,9 +159,17 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
     """Gestionnaire des options de réglage sans redémarrage (Options Flow)."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialisation."""
-        self.config_entry = config_entry
+    def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:
+        """Initialisation compatible toutes versions de Home Assistant."""
+        if config_entry is not None:
+            self._config_entry = config_entry
+
+    @property
+    def config_entry(self) -> config_entries.ConfigEntry:
+        """Retourne l'entrée de configuration."""
+        if hasattr(self, "_config_entry"):
+            return self._config_entry
+        return super().config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

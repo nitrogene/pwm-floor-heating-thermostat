@@ -1,0 +1,77 @@
+name: Bug Report
+description: File a bug report or report unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please provide as much information as possible to help diagnose the issue quickly.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Version
+      placeholder: "e.g. 2024.11.1"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration Version
+      placeholder: "e.g. 0.2.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: system_type
+    attributes:
+      label: Heating System Architecture
+      options:
+        - "Geothermal (Direct Expansion / TOR Danfoss, Copeland...)"
+        - "Hydronic underfloor heating with water return probe"
+        - "Hydronic manifold with electrothermal wax actuators"
+        - "Other / Mixed"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. See error
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Integration Diagnostics (Sanitized)
+      description: |
+        Please attach or paste the `diagnostics.json` file generated from:
+        *Settings -> Devices & Services -> PWM Floor Heating Thermostat -> (3 dots on entry or Device card) -> Download diagnostics*.
+        (Sensitive tokens and passwords are automatically redacted).
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug Logs
+      description: |
+        Please paste the relevant logs. You can enable debug logging by adding this to your `configuration.yaml`:
+        ```yaml
+        logger:
+          default: info
+          logs:
+            custom_components.pwm_floor_heating_thermostat: debug
+        ```
+      render: shell
+    validations:
+      required: false

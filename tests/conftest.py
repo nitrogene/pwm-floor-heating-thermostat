@@ -25,6 +25,7 @@ ha_modules = [
     "homeassistant.helpers.device_registry",
     "homeassistant.components",
     "homeassistant.components.climate",
+    "homeassistant.components.diagnostics",
     "homeassistant.config_entries",
     "homeassistant.data_entry_flow",
     "homeassistant.util",
@@ -57,6 +58,9 @@ import homeassistant.core as ha_core  # noqa: E402
 ha_core.callback = mock_callback
 sys.modules["homeassistant.core"].callback = mock_callback
 sys.modules["homeassistant"].core.callback = mock_callback
+
+# Diagnostics mock
+sys.modules["homeassistant.components.diagnostics"].async_redact_data.side_effect = lambda data, to_redact: data
 
 
 # Classes de base pour éviter le conflit de métaclasse avec MagicMock

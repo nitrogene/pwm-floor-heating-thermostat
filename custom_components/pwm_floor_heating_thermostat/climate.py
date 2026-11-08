@@ -180,7 +180,9 @@ async def async_setup_entry(
     config[CONF_UNIQUE_ID] = entry.entry_id
     if CONF_NAME not in config:
         config[CONF_NAME] = entry.title
-    async_add_entities([PwmFloorHeatingThermostat(hass, config, entry=entry)])
+    entity = PwmFloorHeatingThermostat(hass, config, entry=entry)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entity
+    async_add_entities([entity])
 
 
 class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
@@ -398,7 +400,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.0",
+                sw_version="0.2.1",
             )
         return None
 
