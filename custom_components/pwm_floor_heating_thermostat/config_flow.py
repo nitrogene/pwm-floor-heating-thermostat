@@ -112,7 +112,7 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.NumberSelectorConfig(
                         min=500.0,
                         max=30000.0,
-                        step=100.0,
+                        step=10.0,
                         unit_of_measurement="W",
                         mode=selector.NumberSelectorMode.BOX,
                     )
@@ -217,7 +217,7 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     selector.NumberSelectorConfig(
                         min=500.0,
                         max=30000.0,
-                        step=100.0,
+                        step=10.0,
                         unit_of_measurement="W",
                         mode=selector.NumberSelectorMode.BOX,
                     )

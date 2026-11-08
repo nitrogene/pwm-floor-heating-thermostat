@@ -130,6 +130,10 @@ Setting up your thermostat is fully supported directly in the Home Assistant UI 
 You can recalibrate any thermodynamic parameter or toggle between **Shadow Mode** and **Live Physical Control** at any time without restarting Home Assistant:
 - Navigate to **Settings** -> **Devices & Services** -> **PWM Floor Heating Thermostat** -> click the **Configure** (gear icon ⚙️) button.
 
+| Options Flow - General & Presets | Options Flow - Slab & Staggering |
+| :---: | :---: |
+| ![Options Flow Top](images/options_flow_step1.png) | ![Options Flow Bottom](images/options_flow_step2.png) |
+
 ---
 
 ## YAML Configuration Examples (Alternative)
@@ -253,6 +257,11 @@ If you encounter unexpected regulation behavior or wish to share your model stat
 1. Navigate to **Settings** -> **Devices & Services** -> **PWM Floor Heating Thermostat**.
 2. Click on your thermostat device (or the three dots next to the entry) and select **Download diagnostics**.
 3. Home Assistant will export a sanitized JSON file containing entry configuration, live model attributes, Danfoss FSM timers, and telemetry metrics (all passwords, tokens, and sensitive keys are automatically redacted).
+
+![Download Diagnostics Button](images/device_diagnostics_button.png)
+
+Sample sanitized export preview:
+![Diagnostics Export Preview](images/diagnostics_json_preview.png)
 
 ### 3. Filing an Issue
 
