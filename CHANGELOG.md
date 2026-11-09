@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.5] - 2026-11-09
+
+### Added
+- **Slow Drift Ambient Supervisor (Anti-Integral Windup)**:
+  - Gentle, proportional trim ($K_{\text{ambient}} = 0.15\text{ /}^\circ\text{C}$) applied directly to the 24h daily energy quota based on room setpoint error.
+  - Strictly clamped between $[0.80, 1.25]$ (-20% to +25%), eliminating persistent steady-state room offsets without integral accumulation, windup, or cycling.
+  - Exposed via `ambient_trim_ratio` telemetry attribute and companion diagnostics.
+- **Solar Irradiance Integration with Inviolable Morning Comfort Floor Guard**:
+  - Optional `solar_sensor` configuration taking into account daytime solar irradiance (W/m² or illuminance).
+  - **Inviolable Morning Wake-Up Comfort Guard**: Before 09:00 AM local time or during nighttime Off-Peak recharge, solar credit is strictly locked to $0.0\text{ kWh}$, ensuring 100% full wake-up comfort and preventing under-heated morning floors based on afternoon solar forecasts.
+  - Solar credit is immediately suspended if room ambient temperature drops below target setpoint ($-0.3^\circ\text{C}$).
+  - Strictly bounded to maximum 25% quota deduction (`solar_credit_kwh`), preventing midday overshoots from south-facing windows while preserving base heating needs.
+- **Mode B Soft Self-Adaptation of Building Heat Loss ($H = U \cdot A$)**:
+  - Configurable `auto_calibrate_heat_loss: bool` option in UI Config Flow and Options Flow enabling automatic slow tuning of effective heat loss coefficient.
+  - Activates only after at least 3 validated unheated night decay samples, strictly clamped within $\pm 20\%$ of baseline configured $H$.
+  - Exposed via `effective_heat_loss_wk` and `auto_calibrate_heat_loss` attributes.
+
+---
+
 ## [0.2.4] - 2026-11-09
 
 ### Fixed

@@ -51,8 +51,17 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    AMBIENT_TRIM_GAIN,
+    AMBIENT_TRIM_MAX,
+    AMBIENT_TRIM_MIN,
+    ATTR_AMBIENT_TRIM_RATIO,
     ATTR_COUNTERS_DATE,
+    ATTR_EFFECTIVE_HEAT_LOSS_WK,
+    ATTR_SOLAR_CREDIT_KWH,
+    AUTO_CALIBRATE_MAX_DEVIATION,
+    AUTO_CALIBRATE_MIN_SAMPLES,
     COMFORT_SAFETY_DEFICIT_OVERRIDE,
+    CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
     CONF_COMFORT_TEMP,
     CONF_DEAD_TIME,
@@ -74,6 +83,7 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
+    CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
     CONF_WINDOW_DETECTION,
@@ -81,6 +91,7 @@ from .const import (
     CONF_WINDOW_DROP_THRESHOLD,
     CONF_WINDOW_SENSOR,
     CONF_WINDOW_TIMEOUT,
+    DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
@@ -110,6 +121,8 @@ from .const import (
     OUTDOOR_PRECHARGE_MAX_TEMP,
     POST_AIRING_MAX_DERIVATIVE,
     POST_AIRING_RECOVERY_MINUTES,
+    SOLAR_MAX_CREDIT_RATIO,
+    SOLAR_MORNING_CUTOFF_HOUR,
     WINDOW_DERIVATIVE_THRESHOLD,
 )
 
@@ -147,6 +160,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_AWAY_TEMP, default=DEFAULT_AWAY_TEMP): vol.Coerce(float),
         vol.Optional(CONF_COMFORT_TEMP): vol.Coerce(float),
         vol.Optional(CONF_STAGGER_DELAY, default=DEFAULT_STAGGER_DELAY): cv.time_period,
+        vol.Optional(CONF_SOLAR_SENSOR): cv.entity_id,
+        vol.Optional(
+            CONF_AUTO_CALIBRATE_HEAT_LOSS, default=DEFAULT_AUTO_CALIBRATE_HEAT_LOSS
+        ): cv.boolean,
     }
 )
 
@@ -258,6 +275,19 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Continuous passive calibration of heat loss H (Mode A)
         self._heat_loss_measured_wk: float | None = None
         self._heat_loss_samples_count: int = 0
+
+        # Mode B soft self-adaptation of heat loss H
+        self._auto_calibrate_heat_loss = bool(
+            config.get(CONF_AUTO_CALIBRATE_HEAT_LOSS, DEFAULT_AUTO_CALIBRATE_HEAT_LOSS)
+        )
+        self._effective_heat_loss: float = self._heat_loss
+
+        # Daytime solar irradiance sensor
+        self._solar_sensor = config.get(CONF_SOLAR_SENSOR)
+        self._solar_credit_kwh: float = 0.0
+
+        # Slow drift ambient supervisor
+        self._ambient_trim_ratio: float = 1.0
 
         # Temperature presets
         self._eco_temp = float(config.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP))
@@ -419,6 +449,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self._solar_sensor:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._solar_sensor], self._async_solar_sensor_changed
+                )
+            )
+
         # Periodic control loop (every minute)
         self.async_on_remove(
             async_track_time_interval(
@@ -451,7 +488,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.4",
+                sw_version="0.2.5",
             )
         return None
 
@@ -568,8 +605,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ),
             "model_error": self._model_error,
             "heat_loss_factor_wk": self._heat_loss,
+            ATTR_EFFECTIVE_HEAT_LOSS_WK: self._effective_heat_loss,
+            "auto_calibrate_heat_loss": self._auto_calibrate_heat_loss,
             "compressor_power_watts": self._power_watts,
             "energy_quota_24h_kwh": round(self._energy_needed_kwh, 2),
+            ATTR_AMBIENT_TRIM_RATIO: self._ambient_trim_ratio,
+            ATTR_SOLAR_CREDIT_KWH: self._solar_credit_kwh,
             "heating_hours_needed_24h": round(self._hours_needed_24h, 2),
             "heating_hours_done_today": round(run_hours, 2),
             "heating_hours_remaining_24h": round(max(0.0, self._hours_needed_24h - run_hours), 2),
@@ -705,6 +746,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 "OPEN" if self._window_open else "CLOSED",
             )
             self.hass.async_create_task(self._async_control_heating())
+
+    @callback
+    def _async_solar_sensor_changed(self, event: Any) -> None:
+        """Handle solar irradiance sensor state change."""
+        self.async_write_ha_state()
 
     @property
     def _total_heating_hours_today(self) -> float:
@@ -926,19 +972,72 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # 2. Update state observer and slab trajectory projection
         self._update_trajectory_projection(now_utc)
 
-        # 3. Calculate 24h thermal energy quota (kWh)
-        if self._outdoor_temp is not None:
-            delta_t = max(0.0, self._target_temp - self._outdoor_temp)
-            # Daily thermal heat loss in kWh = (H * delta_t * 24h) / 1000
-            self._energy_needed_kwh = (self._heat_loss * delta_t * 24.0) / 1000.0
-            # Required compressor operating hours over 24h
-            self._hours_needed_24h = (self._energy_needed_kwh * 1000.0) / self._power_watts
+        # 3. Mode B Soft Self-Adaptation: evaluate effective heat loss H
+        self._effective_heat_loss = self._heat_loss
+        if (
+            self._auto_calibrate_heat_loss
+            and self._heat_loss_measured_wk is not None
+            and self._heat_loss_samples_count >= AUTO_CALIBRATE_MIN_SAMPLES
+        ):
+            min_h = round((1.0 - AUTO_CALIBRATE_MAX_DEVIATION) * self._heat_loss, 1)
+            max_h = round((1.0 + AUTO_CALIBRATE_MAX_DEVIATION) * self._heat_loss, 1)
+            self._effective_heat_loss = round(
+                max(min_h, min(max_h, self._heat_loss_measured_wk)), 1
+            )
 
         # 4. Check Off-Peak tariff active state
         off_peak_active = False
         if self._off_peak_sensor:
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
+
+        # 5. Calculate 24h thermal energy quota (kWh) with Slow Drift Ambient Supervisor
+        if self._outdoor_temp is not None:
+            delta_t = max(0.0, self._target_temp - self._outdoor_temp)
+            base_energy_kwh = (self._effective_heat_loss * delta_t * 24.0) / 1000.0
+
+            # Ambient supervisor: gentle proportional trim eliminating persistent offset without integral windup
+            if self._cur_temp is not None:
+                ambient_error = self._target_temp - self._cur_temp
+                self._ambient_trim_ratio = round(
+                    max(AMBIENT_TRIM_MIN, min(AMBIENT_TRIM_MAX, 1.0 + AMBIENT_TRIM_GAIN * ambient_error)),
+                    3,
+                )
+            else:
+                self._ambient_trim_ratio = 1.0
+
+            trimmed_energy_kwh = base_energy_kwh * self._ambient_trim_ratio
+
+            # 6. Solar gain integration with inviolable Morning Wake-Up Comfort Guard
+            self._solar_credit_kwh = 0.0
+            if self._solar_sensor:
+                local_now = dt_util.now()
+                # Comfort Guard 1: Before 09:00 AM local time or during off-peak night recharge,
+                # solar credit is strictly 0.0 to prevent under-heating at morning wake-up.
+                # Comfort Guard 2: If current temperature is already below comfort setpoint (>0.3°C drop),
+                # solar credit is completely inhibited.
+                comfort_guard_active = (
+                    local_now.hour < SOLAR_MORNING_CUTOFF_HOUR
+                    or off_peak_active
+                    or (self._cur_temp is not None and self._cur_temp < (self._target_temp - 0.3))
+                )
+
+                if not comfort_guard_active:
+                    st_solar = self.hass.states.get(self._solar_sensor)
+                    if st_solar and st_solar.state not in ["unknown", "unavailable"]:
+                        try:
+                            solar_val = float(st_solar.state)
+                            if solar_val > 50.0:  # Active solar irradiance threshold (W/m² or equivalent)
+                                # Scale between 50 W/m² (diffuse) and 800 W/m² (bright direct sun)
+                                solar_factor = min(1.0, max(0.0, (solar_val - 50.0) / 750.0))
+                                max_solar_credit = trimmed_energy_kwh * SOLAR_MAX_CREDIT_RATIO
+                                self._solar_credit_kwh = round(max_solar_credit * solar_factor, 2)
+                        except (ValueError, TypeError):
+                            pass
+
+            self._energy_needed_kwh = max(0.0, round(trimmed_energy_kwh - self._solar_credit_kwh, 2))
+            # Required compressor operating hours over 24h
+            self._hours_needed_24h = (self._energy_needed_kwh * 1000.0) / self._power_watts
 
         # 5. Model-based predictive scheduling strategy
         should_heat = False

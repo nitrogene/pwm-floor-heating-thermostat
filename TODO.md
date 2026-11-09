@@ -13,18 +13,18 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
   - [x] Telemetry attributes exposure: `temp_derivative_hourly` and `temp_projected_ahead`.
 - [ ] **Dynamic Heat Gains & Environmental Losses:**
   - [ ] Wind integration (convective envelope heat loss amplification).
-  - [ ] Solar irradiance integration (illuminance sensor or solar forecast in W/m²) to inhibit unneeded morning charges on sunny days.
+  - [x] **Solar Irradiance Integration with Morning Comfort Guard (`solar_sensor`):** Daytime solar gain deduction bounded by max 25% quota reduction, with inviolable 0h-9h morning comfort guard preventing under-heated morning wake-up.
 - [ ] **Inter-Zone Convective Coupling:**
   - [ ] Model passive thermal heat transfers between adjacent open spaces (e.g. warm air convective draft from Living Room to Mezzanine/Office).
   - [ ] Multi-zone electrical coordinator to smooth grid power draws (preventing simultaneous starts).
-- [ ] **Self-Calibration & Continuous Learning:**
-  - [ ] Periodic heat loss estimation $H = U \cdot A$ (W/K) via linear regression on passive unheated night decay periods ($dT/dt$ vs $\Delta T_{\text{int-ext}}$).
-  - [ ] **Mode A (Advisory Passive Telemetry):** Telemetry attribute `heat_loss_measured_wk` showing real-world measured building heat loss without altering active control.
-  - [ ] **Mode B (Optional Soft Auto-Adaptation `auto_calibrate_heat_loss: true`):**
-    - [ ] Strict validation conditions (nighttime, heater off for $> \theta$, thermal equilibrium).
-    - [ ] Slow exponential smoothing IIR filter (95/5) preventing sudden jumps.
-    - [ ] Hard bounds clamped to $\pm 20\%$ of baseline configuration.
-  - [ ] Dynamic calibration of slab time constant $\tau$ and dead time $\theta$.
+- [x] **Self-Calibration & Continuous Learning:**
+  - [x] Periodic heat loss estimation $H = U \cdot A$ (W/K) via passive unheated night decay periods.
+  - [x] **Mode A (Advisory Passive Telemetry):** Telemetry attribute `heat_loss_measured_wk` showing real-world measured building heat loss without altering active control.
+  - [x] **Mode B (Soft Auto-Adaptation `auto_calibrate_heat_loss: true`):**
+    - [x] Strict validation conditions (minimum 3 validated night decay samples).
+    - [x] Slow exponential smoothing IIR filter preventing sudden jumps.
+    - [x] Hard bounds clamped to $\pm 20\%$ of baseline configured $H$.
+  - [ ] Dynamic calibration of slab time constant $\tau$ and dead time $\theta$ (Future).
 
 ---
 
@@ -68,9 +68,9 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
 - [ ] **Advanced Dynamic Tariffs & Multi-Rate Schedulers (Future Roadmap):**
   - [ ] Dynamic hourly spot-market tariff integration (EPEX Spot, NordPool, French EDF Tempo 6-color matrix).
   - [ ] Adaptive PWM period modulation (e.g. 3h deep accumulation cycles in Off-Peak vs 45 min top-up cycles in Peak hours).
-- [ ] **Slow Drift Ambient Supervisor (Anti-Integral Windup):**
-  - [ ] Gentle and bounded proportional trim on the 24h daily energy quota.
-  - [ ] Permanent elimination of continuous divergent integrator windup.
+- [x] **Slow Drift Ambient Supervisor (Anti-Integral Windup):**
+  - [x] Gentle and bounded proportional trim on the 24h daily energy quota ($K_{\text{ambient}} = 0.15\text{ /}^\circ\text{C}$, clamped $[0.80, 1.25]$).
+  - [x] Permanent elimination of continuous divergent integrator windup and steady-state offsets.
 
 ---
 
@@ -131,5 +131,5 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
   - [x] **Field Soak Test & Real-World Telemetry:** Validated on 24h real-world cycle across 3 zones (aeration freeze, Kalata quantization filtering, overshoot prevention, off-peak precharge).
   - [x] **UI Journey Screenshots:** HACS installation, Config Flow step-by-step, device card, and integration hub for documentation (`README.md`).
   - [x] **Final HACS Submission Gate:** 100% green CI (Hassfest, HACS, Ruff, Pytest), brand assets (icon, logo).
-  - [ ] **Submit Pull Request:** Open PR on official community repository `hacs/default`.
-  - [ ] **Public Directory Listing:** 1-click community installation directly within Home Assistant Marketplace.
+  - [x] **Submit Pull Request:** Open PR on official community repository `hacs/default` ([PR #13790](https://github.com/hacs/default/pull/13790)).
+  - [ ] **Public Directory Listing:** In review queue by HACS maintainers for 1-click community installation.

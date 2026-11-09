@@ -16,7 +16,9 @@
           "power_watts": "Puissance thermique utile (W)",
           "slab_tau_hours": "Constante de temps d'inertie de la dalle (heures)",
           "dead_time_hours": "Temps mort de traversée de dalle (heures)",
-          "floor_temp_sensor": "Sonde de boucle d'eau / dalle (hydraulique)"
+          "floor_temp_sensor": "Sonde de boucle d'eau / dalle (hydraulique)",
+          "solar_sensor": "Capteur de rayonnement solaire / luminosité",
+          "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)"
         }
       }
     },
@@ -50,7 +52,9 @@
           "floor_temp_sensor": "Sonde de boucle d'eau / dalle",
           "max_floor_temp": "Plafond max température dalle (°C)",
           "min_floor_temp": "Seuil hors-gel dalle (°C)",
-          "stagger_delay": "Délai de déphasage anti-pic de démarrage (secondes)"
+          "stagger_delay": "Délai de déphasage anti-pic de démarrage (secondes)",
+          "solar_sensor": "Capteur de rayonnement solaire / luminosité",
+          "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)"
         }
       }
     }

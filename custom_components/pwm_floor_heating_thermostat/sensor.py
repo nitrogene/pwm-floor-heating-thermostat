@@ -168,7 +168,7 @@ class PwmDiagnosticSensor(SensorEntity):
             name=self._entry.title,
             manufacturer="Nitrogene",
             model="PWM Thermodynamic Underfloor Thermostat",
-            sw_version="0.2.4",
+            sw_version="0.2.5",
         )
 
     async def async_added_to_hass(self) -> None:

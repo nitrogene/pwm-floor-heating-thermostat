@@ -25,6 +25,11 @@ CONF_HEAT_LOSS = "heat_loss_wk"          # Overall room heat loss coefficient (W
 CONF_POWER_WATTS = "power_watts"        # Heat pump thermal output power (W)
 CONF_SLAB_TIME_CONSTANT = "slab_tau_hours"  # Slab thermal inertia time constant (hours)
 CONF_DEAD_TIME = "dead_time_hours"      # Pure slab transport dead time (hours)
+CONF_AUTO_CALIBRATE_HEAT_LOSS = "auto_calibrate_heat_loss"  # Mode B soft self-adaptation of heat loss
+DEFAULT_AUTO_CALIBRATE_HEAT_LOSS = False
+
+# Solar irradiance & daytime solar gain
+CONF_SOLAR_SENSOR = "solar_sensor"
 
 # Compressor mechanical safeties (Danfoss)
 CONF_MIN_CYCLE_DURATION = "min_cycle_duration"
@@ -91,3 +96,15 @@ WINDOW_DERIVATIVE_THRESHOLD = -1.5              # Negative hourly derivative thr
 POST_AIRING_RECOVERY_MINUTES = 30               # Post-ventilation thermal recovery damping window (minutes)
 POST_AIRING_MAX_DERIVATIVE = 0.05               # Max allowed positive derivative during post-airing recovery (°C/h)
 ATTR_COUNTERS_DATE = "counters_date"
+ATTR_AMBIENT_TRIM_RATIO = "ambient_trim_ratio"
+ATTR_SOLAR_CREDIT_KWH = "solar_credit_kwh"
+ATTR_EFFECTIVE_HEAT_LOSS_WK = "effective_heat_loss_wk"
+
+# Ambient supervisor and solar parameters
+AMBIENT_TRIM_MIN = 0.80                         # Max 20% quota reduction on warm rooms
+AMBIENT_TRIM_MAX = 1.25                         # Max 25% quota boost on cold rooms
+AMBIENT_TRIM_GAIN = 0.15                        # 15% quota trim per °C of room error
+SOLAR_MORNING_CUTOFF_HOUR = 9                   # Local hour before which solar credit is strictly 0.0 (morning comfort guard)
+SOLAR_MAX_CREDIT_RATIO = 0.25                   # Max 25% quota reduction from daytime solar irradiance
+AUTO_CALIBRATE_MIN_SAMPLES = 3                  # Minimum validated night decay samples before engaging Mode B
+AUTO_CALIBRATE_MAX_DEVIATION = 0.20             # Max +/-20% variation allowed around configured baseline H

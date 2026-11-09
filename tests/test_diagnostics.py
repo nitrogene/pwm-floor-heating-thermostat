@@ -32,8 +32,12 @@ def test_diagnostics_returns_sanitized_data():
         thermostat._temp_projected = 20.95
         thermostat._model_error = 0.05
         thermostat._heat_loss = 15.0
+        thermostat._effective_heat_loss = 14.8
+        thermostat._auto_calibrate_heat_loss = True
         thermostat._power_watts = 3250.0
         thermostat._energy_needed_kwh = 3.6
+        thermostat._ambient_trim_ratio = 1.0
+        thermostat._solar_credit_kwh = 0.5
         thermostat._hours_needed_24h = 1.11
         thermostat._hours_run_today = 0.5
         thermostat._enforce_daily_quota = True
@@ -69,6 +73,11 @@ def test_diagnostics_returns_sanitized_data():
         assert live["heating_hours_needed_24h"] == 1.11
         assert live["heating_hours_done_today"] == 0.5
         assert live["heating_hours_remaining_24h"] == 0.61
+        assert live["heat_loss_factor_wk"] == 15.0
+        assert live["effective_heat_loss_wk"] == 14.8
+        assert live["auto_calibrate_heat_loss"] is True
+        assert live["ambient_trim_ratio"] == 1.0
+        assert live["solar_credit_kwh"] == 0.5
         assert live["compressor_cycles_today"] == 2
         assert live["max_cycles_budget"] == 6
         assert live["extra_state_attributes"]["counters_date"] == "2026-11-09"

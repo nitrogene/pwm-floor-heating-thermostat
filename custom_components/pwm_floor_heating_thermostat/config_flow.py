@@ -18,6 +18,7 @@ except ImportError:
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
@@ -33,10 +34,12 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
+    CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_SENSOR,
+    DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
@@ -145,6 +148,13 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_FLOOR_TEMP_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor"])
                 ),
+                vol.Optional(CONF_SOLAR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor", "weather"])
+                ),
+                vol.Optional(
+                    CONF_AUTO_CALIBRATE_HEAT_LOSS,
+                    default=DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
+                ): selector.BooleanSelector(),
             }
         )
 
@@ -337,6 +347,21 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(
+                    CONF_SOLAR_SENSOR,
+                    description={"suggested_value": curr.get(CONF_SOLAR_SENSOR)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor", "weather"])
+                ),
+                vol.Required(
+                    CONF_AUTO_CALIBRATE_HEAT_LOSS,
+                    default=bool(
+                        curr.get(
+                            CONF_AUTO_CALIBRATE_HEAT_LOSS,
+                            DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
+                        )
+                    ),
+                ): selector.BooleanSelector(),
             }
         )
 
