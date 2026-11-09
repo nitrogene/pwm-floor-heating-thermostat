@@ -27,14 +27,18 @@ CONF_SLAB_TIME_CONSTANT = "slab_tau_hours"  # Slab thermal inertia time constant
 CONF_DEAD_TIME = "dead_time_hours"      # Pure slab transport dead time (hours)
 CONF_AUTO_CALIBRATE_HEAT_LOSS = "auto_calibrate_heat_loss"  # Mode B soft self-adaptation of heat loss
 DEFAULT_AUTO_CALIBRATE_HEAT_LOSS = False
+CONF_AUTO_CALIBRATE_DEAD_TIME = "auto_calibrate_dead_time"  # Soft self-adaptation of dead time theta
+DEFAULT_AUTO_CALIBRATE_DEAD_TIME = False
 
-# Solar irradiance & daytime solar gain
+# Environmental sensors (solar irradiance & wind convective loss)
 CONF_SOLAR_SENSOR = "solar_sensor"
+CONF_WIND_SENSOR = "wind_sensor"
 
 # Compressor mechanical safeties (Danfoss)
 CONF_MIN_CYCLE_DURATION = "min_cycle_duration"
 CONF_MIN_OFF_CYCLE_DURATION = "min_off_cycle_duration"
 CONF_MAX_CYCLES_PER_DAY = "max_cycles_per_day"
+CONF_PEAK_MAX_RUN_DURATION = "peak_max_run_duration"  # Adaptive PWM modulation: max continuous run in peak hours
 
 # Daily energy budget cap (Anti-waste during peak hours)
 CONF_ENFORCE_DAILY_QUOTA = "enforce_daily_quota"
@@ -81,6 +85,7 @@ DEFAULT_DEAD_TIME_HOURS = 2.25         # ~2h15 slab dead time
 
 DEFAULT_MIN_CYCLE = timedelta(minutes=30)
 DEFAULT_MIN_OFF = timedelta(minutes=15)
+DEFAULT_PEAK_MAX_RUN_DURATION = timedelta(minutes=45)
 DEFAULT_MAX_CYCLES = 6
 
 # Finite State Machine (FSM) states
@@ -108,3 +113,17 @@ SOLAR_MORNING_CUTOFF_HOUR = 9                   # Local hour before which solar 
 SOLAR_MAX_CREDIT_RATIO = 0.25                   # Max 25% quota reduction from daytime solar irradiance
 AUTO_CALIBRATE_MIN_SAMPLES = 3                  # Minimum validated night decay samples before engaging Mode B
 AUTO_CALIBRATE_MAX_DEVIATION = 0.20             # Max +/-20% variation allowed around configured baseline H
+
+# Wind convective amplification parameters
+WIND_SPEED_CALM_THRESHOLD = 15.0                # Calm wind threshold below which forced convection is negligible (km/h)
+WIND_AMPLIFICATION_GAIN = 0.005                 # +0.5% heat loss boost per km/h above calm threshold
+WIND_MAX_AMPLIFICATION = 1.25                   # Maximum +25% heat loss boost from high wind
+DEAD_TIME_MIN_SAMPLES = 3                       # Minimum validated cycles before soft adapting dead time
+DEAD_TIME_MAX_DEVIATION = 0.25                  # Max +/-25% variation allowed around configured baseline dead time
+
+# Wind & dead time telemetry attributes
+ATTR_WIND_FACTOR = "wind_factor"
+ATTR_WIND_SPEED = "wind_speed"
+ATTR_DEAD_TIME_MEASURED_HOURS = "dead_time_measured_hours"
+ATTR_DEAD_TIME_SAMPLES_COUNT = "dead_time_samples_count"
+ATTR_EFFECTIVE_DEAD_TIME_HOURS = "effective_dead_time_hours"

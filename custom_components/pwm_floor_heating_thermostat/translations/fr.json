@@ -18,7 +18,10 @@
           "dead_time_hours": "Temps mort de traversée de dalle (heures)",
           "floor_temp_sensor": "Sonde de boucle d'eau / dalle (hydraulique)",
           "solar_sensor": "Capteur de rayonnement solaire / luminosité",
-          "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)"
+          "wind_sensor": "Capteur de vitesse du vent / anémomètre",
+          "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)",
+          "auto_calibrate_dead_time": "Auto-adaptation douce du temps mort Thêta (Mode B)",
+          "peak_max_run_duration": "Durée maximale d'un cycle en Heures Pleines (minutes)"
         }
       }
     },
@@ -54,7 +57,10 @@
           "min_floor_temp": "Seuil hors-gel dalle (°C)",
           "stagger_delay": "Délai de déphasage anti-pic de démarrage (secondes)",
           "solar_sensor": "Capteur de rayonnement solaire / luminosité",
-          "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)"
+          "wind_sensor": "Capteur de vitesse du vent / anémomètre",
+          "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)",
+          "auto_calibrate_dead_time": "Auto-adaptation douce du temps mort Thêta (Mode B)",
+          "peak_max_run_duration": "Durée maximale d'un cycle en Heures Pleines (minutes)"
         }
       }
     }

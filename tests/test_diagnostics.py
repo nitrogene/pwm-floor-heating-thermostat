@@ -1,6 +1,7 @@
 """Tests for diagnostics module."""
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 from custom_components.pwm_floor_heating_thermostat.const import DOMAIN
@@ -30,10 +31,17 @@ def test_diagnostics_returns_sanitized_data():
         thermostat._decision_reason = "Idle"
         thermostat._temp_derivative = -0.15
         thermostat._temp_projected = 20.95
+        thermostat._dead_time = 2.25
+        thermostat._effective_dead_time = 2.25
+        thermostat._dead_time_measured_hours = 2.30
+        thermostat._dead_time_samples_count = 3
+        thermostat._auto_calibrate_dead_time = False
         thermostat._model_error = 0.05
         thermostat._heat_loss = 15.0
         thermostat._effective_heat_loss = 14.8
         thermostat._auto_calibrate_heat_loss = True
+        thermostat._wind_factor = 1.05
+        thermostat._wind_speed = 25.0
         thermostat._power_watts = 3250.0
         thermostat._energy_needed_kwh = 3.6
         thermostat._ambient_trim_ratio = 1.0
@@ -49,6 +57,7 @@ def test_diagnostics_returns_sanitized_data():
         thermostat._dry_run = False
         thermostat._simulated_heater_state = False
         thermostat._stagger_delay = None
+        thermostat._peak_max_run_duration = timedelta(minutes=45)
         thermostat._cycles_today = 2
         thermostat._max_cycles = 6
         thermostat.extra_state_attributes = {"counters_date": "2026-11-09"}
@@ -69,6 +78,11 @@ def test_diagnostics_returns_sanitized_data():
         assert live["fsm_state"] == "idle"
         assert live["temp_derivative_hourly"] == -0.15
         assert live["temp_projected_ahead"] == 20.95
+        assert live["dead_time_hours"] == 2.25
+        assert live["effective_dead_time_hours"] == 2.25
+        assert live["dead_time_measured_hours"] == 2.30
+        assert live["dead_time_samples_count"] == 3
+        assert live["auto_calibrate_dead_time"] is False
         assert live["energy_quota_24h_kwh"] == 3.6
         assert live["heating_hours_needed_24h"] == 1.11
         assert live["heating_hours_done_today"] == 0.5
@@ -76,8 +90,11 @@ def test_diagnostics_returns_sanitized_data():
         assert live["heat_loss_factor_wk"] == 15.0
         assert live["effective_heat_loss_wk"] == 14.8
         assert live["auto_calibrate_heat_loss"] is True
+        assert live["wind_factor"] == 1.05
+        assert live["wind_speed"] == 25.0
         assert live["ambient_trim_ratio"] == 1.0
         assert live["solar_credit_kwh"] == 0.5
+        assert live["peak_max_run_duration_min"] == 45
         assert live["compressor_cycles_today"] == 2
         assert live["max_cycles_budget"] == 6
         assert live["extra_state_attributes"]["counters_date"] == "2026-11-09"

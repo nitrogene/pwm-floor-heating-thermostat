@@ -56,11 +56,17 @@ from .const import (
     AMBIENT_TRIM_MIN,
     ATTR_AMBIENT_TRIM_RATIO,
     ATTR_COUNTERS_DATE,
+    ATTR_DEAD_TIME_MEASURED_HOURS,
+    ATTR_DEAD_TIME_SAMPLES_COUNT,
+    ATTR_EFFECTIVE_DEAD_TIME_HOURS,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
     ATTR_SOLAR_CREDIT_KWH,
+    ATTR_WIND_FACTOR,
+    ATTR_WIND_SPEED,
     AUTO_CALIBRATE_MAX_DEVIATION,
     AUTO_CALIBRATE_MIN_SAMPLES,
     COMFORT_SAFETY_DEFICIT_OVERRIDE,
+    CONF_AUTO_CALIBRATE_DEAD_TIME,
     CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
     CONF_COMFORT_TEMP,
@@ -81,16 +87,21 @@ from .const import (
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
     CONF_OUTDOOR_SENSOR,
+    CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
+    CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_DETECTION_SENSOR,
     CONF_WINDOW_DROP_THRESHOLD,
     CONF_WINDOW_SENSOR,
     CONF_WINDOW_TIMEOUT,
+    DEAD_TIME_MAX_DEVIATION,
+    DEAD_TIME_MIN_SAMPLES,
+    DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
     DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
     DEFAULT_DEAD_TIME_HOURS,
@@ -106,6 +117,7 @@ from .const import (
     DEFAULT_MIN_OFF,
     DEFAULT_MIN_TEMP,
     DEFAULT_NAME,
+    DEFAULT_PEAK_MAX_RUN_DURATION,
     DEFAULT_POWER_WATTS,
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_STAGGER_DELAY,
@@ -123,6 +135,9 @@ from .const import (
     POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
     SOLAR_MORNING_CUTOFF_HOUR,
+    WIND_AMPLIFICATION_GAIN,
+    WIND_MAX_AMPLIFICATION,
+    WIND_SPEED_CALM_THRESHOLD,
     WINDOW_DERIVATIVE_THRESHOLD,
 )
 
@@ -161,9 +176,16 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_COMFORT_TEMP): vol.Coerce(float),
         vol.Optional(CONF_STAGGER_DELAY, default=DEFAULT_STAGGER_DELAY): cv.time_period,
         vol.Optional(CONF_SOLAR_SENSOR): cv.entity_id,
+        vol.Optional(CONF_WIND_SENSOR): cv.entity_id,
         vol.Optional(
             CONF_AUTO_CALIBRATE_HEAT_LOSS, default=DEFAULT_AUTO_CALIBRATE_HEAT_LOSS
         ): cv.boolean,
+        vol.Optional(
+            CONF_AUTO_CALIBRATE_DEAD_TIME, default=DEFAULT_AUTO_CALIBRATE_DEAD_TIME
+        ): cv.boolean,
+        vol.Optional(
+            CONF_PEAK_MAX_RUN_DURATION, default=DEFAULT_PEAK_MAX_RUN_DURATION
+        ): cv.time_period,
     }
 )
 
@@ -257,6 +279,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._min_cycle_duration = _parse_timedelta(config.get(CONF_MIN_CYCLE_DURATION), DEFAULT_MIN_CYCLE)
         self._min_off_duration = _parse_timedelta(config.get(CONF_MIN_OFF_CYCLE_DURATION), DEFAULT_MIN_OFF)
         self._max_cycles = int(config.get(CONF_MAX_CYCLES_PER_DAY, DEFAULT_MAX_CYCLES))
+        self._peak_max_run_duration = _parse_timedelta(
+            config.get(CONF_PEAK_MAX_RUN_DURATION), DEFAULT_PEAK_MAX_RUN_DURATION
+        )
 
         # Daily thermal energy quota cap (Peak-hours anti-waste)
         self._enforce_daily_quota = bool(config.get(CONF_ENFORCE_DAILY_QUOTA, DEFAULT_ENFORCE_DAILY_QUOTA))
@@ -285,6 +310,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Daytime solar irradiance sensor
         self._solar_sensor = config.get(CONF_SOLAR_SENSOR)
         self._solar_credit_kwh: float = 0.0
+
+        # Wind convective loss amplification
+        self._wind_sensor = config.get(CONF_WIND_SENSOR)
+        self._wind_speed: float | None = None
+        self._wind_factor: float = 1.0
+
+        # Dead time theta calibration & identification
+        self._auto_calibrate_dead_time = bool(
+            config.get(CONF_AUTO_CALIBRATE_DEAD_TIME, DEFAULT_AUTO_CALIBRATE_DEAD_TIME)
+        )
+        self._effective_dead_time: float = self._dead_time
+        self._dead_time_measured_hours: float | None = None
+        self._dead_time_samples_count: int = 0
+        self._heating_start_derivative: float | None = None
 
         # Slow drift ambient supervisor
         self._ambient_trim_ratio: float = 1.0
@@ -382,6 +421,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._heat_loss_measured_wk = float(old_attrs["heat_loss_measured_wk"])
                 except (ValueError, TypeError):
                     pass
+            if "dead_time_measured_hours" in old_attrs and old_attrs["dead_time_measured_hours"] is not None:
+                try:
+                    self._dead_time_measured_hours = float(old_attrs["dead_time_measured_hours"])
+                except (ValueError, TypeError):
+                    pass
+            if "dead_time_samples_count" in old_attrs and old_attrs["dead_time_samples_count"] is not None:
+                try:
+                    self._dead_time_samples_count = int(old_attrs["dead_time_samples_count"])
+                except (ValueError, TypeError):
+                    pass
             if "model_error" in old_attrs and old_attrs["model_error"] is not None:
                 try:
                     self._model_error = float(old_attrs["model_error"])
@@ -456,6 +505,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self._wind_sensor:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._wind_sensor], self._async_wind_sensor_changed
+                )
+            )
+
         # Periodic control loop (every minute)
         self.async_on_remove(
             async_track_time_interval(
@@ -488,7 +544,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.5",
+                sw_version="0.2.6",
             )
         return None
 
@@ -599,6 +655,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "max_floor_temperature": self._max_floor_temp if self._floor_temp_sensor else None,
             "min_floor_temperature": self._min_floor_temp if self._floor_temp_sensor else None,
             "dead_time_hours": self._dead_time,
+            ATTR_EFFECTIVE_DEAD_TIME_HOURS: self._effective_dead_time,
+            ATTR_DEAD_TIME_MEASURED_HOURS: self._dead_time_measured_hours,
+            ATTR_DEAD_TIME_SAMPLES_COUNT: self._dead_time_samples_count,
+            "auto_calibrate_dead_time": self._auto_calibrate_dead_time,
             "temp_derivative_hourly": round(self._temp_derivative, 3),
             "temp_projected_ahead": (
                 round(self._temp_projected, 2) if self._temp_projected is not None else None
@@ -607,6 +667,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "heat_loss_factor_wk": self._heat_loss,
             ATTR_EFFECTIVE_HEAT_LOSS_WK: self._effective_heat_loss,
             "auto_calibrate_heat_loss": self._auto_calibrate_heat_loss,
+            ATTR_WIND_FACTOR: self._wind_factor,
+            ATTR_WIND_SPEED: self._wind_speed,
             "compressor_power_watts": self._power_watts,
             "energy_quota_24h_kwh": round(self._energy_needed_kwh, 2),
             ATTR_AMBIENT_TRIM_RATIO: self._ambient_trim_ratio,
@@ -624,6 +686,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "eco_temp": self._eco_temp,
             "away_temp": self._away_temp,
             "stagger_delay_sec": int(self._stagger_delay.total_seconds()),
+            "peak_max_run_duration_min": int(self._peak_max_run_duration.total_seconds() // 60),
             "compressor_cycles_today": self._cycles_today,
             "max_cycles_budget": self._max_cycles,
             ATTR_COUNTERS_DATE: str(dt_util.now().date()),
@@ -750,6 +813,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     @callback
     def _async_solar_sensor_changed(self, event: Any) -> None:
         """Handle solar irradiance sensor state change."""
+        self.async_write_ha_state()
+
+    @callback
+    def _async_wind_sensor_changed(self, event: Any) -> None:
+        """Handle wind speed sensor state change."""
         self.async_write_ha_state()
 
     @property
@@ -885,17 +953,17 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             effective_deriv = self._temp_derivative
 
         # Projected trajectory at t + theta (computed from filtered temperature)
-        self._temp_projected = self._filtered_temp + (self._dead_time * effective_deriv)
+        self._temp_projected = self._filtered_temp + (self._effective_dead_time * effective_deriv)
 
         # Record projection for continuous model error evaluation
         self._projection_history.append((now, self._temp_projected))
 
         # Prune projection history (retain up to 2 * dead_time + 1h)
-        cutoff_proj = now - timedelta(hours=max(4.0, (self._dead_time * 2.0) + 1.0))
+        cutoff_proj = now - timedelta(hours=max(4.0, (self._effective_dead_time * 2.0) + 1.0))
         self._projection_history = [(t, v) for t, v in self._projection_history if t >= cutoff_proj]
 
         # Evaluate model error: e_model(t) = T_measured(t) - T_projected(t - theta)
-        target_time = now - timedelta(hours=self._dead_time)
+        target_time = now - timedelta(hours=self._effective_dead_time)
         past_proj: float | None = None
         for i in range(len(self._projection_history) - 1):
             t1, p1 = self._projection_history[i]
@@ -969,10 +1037,23 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # 1. Evaluate ventilation / window open state
         self._check_window_open_state(now_utc)
 
-        # 2. Update state observer and slab trajectory projection
+        # 2. Evaluate effective dead time theta (Soft Self-Adaptation)
+        self._effective_dead_time = self._dead_time
+        if (
+            self._auto_calibrate_dead_time
+            and self._dead_time_measured_hours is not None
+            and self._dead_time_samples_count >= DEAD_TIME_MIN_SAMPLES
+        ):
+            min_d = round((1.0 - DEAD_TIME_MAX_DEVIATION) * self._dead_time, 2)
+            max_d = round((1.0 + DEAD_TIME_MAX_DEVIATION) * self._dead_time, 2)
+            self._effective_dead_time = round(
+                max(min_d, min(max_d, self._dead_time_measured_hours)), 2
+            )
+
+        # 3. Update state observer and slab trajectory projection at t + theta_effective
         self._update_trajectory_projection(now_utc)
 
-        # 3. Mode B Soft Self-Adaptation: evaluate effective heat loss H
+        # 4. Mode B Soft Self-Adaptation: evaluate effective heat loss H
         self._effective_heat_loss = self._heat_loss
         if (
             self._auto_calibrate_heat_loss
@@ -985,16 +1066,38 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 max(min_h, min(max_h, self._heat_loss_measured_wk)), 1
             )
 
-        # 4. Check Off-Peak tariff active state
+        # 5. Wind convective heat loss amplification
+        self._wind_factor = 1.0
+        self._wind_speed = None
+        if self._wind_sensor:
+            st_w = self.hass.states.get(self._wind_sensor)
+            if st_w and st_w.state not in ["unknown", "unavailable"]:
+                try:
+                    if st_w.domain == "weather" and "wind_speed" in st_w.attributes:
+                        self._wind_speed = float(st_w.attributes["wind_speed"])
+                    else:
+                        self._wind_speed = float(st_w.state)
+                    if self._wind_speed > WIND_SPEED_CALM_THRESHOLD:
+                        excess_wind = self._wind_speed - WIND_SPEED_CALM_THRESHOLD
+                        self._wind_factor = round(
+                            min(WIND_MAX_AMPLIFICATION, 1.0 + WIND_AMPLIFICATION_GAIN * excess_wind),
+                            3,
+                        )
+                except (ValueError, TypeError):
+                    pass
+
+        # 6. Check Off-Peak tariff active state
         off_peak_active = False
         if self._off_peak_sensor:
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
-        # 5. Calculate 24h thermal energy quota (kWh) with Slow Drift Ambient Supervisor
+        # 7. Calculate 24h thermal energy quota (kWh) with Wind & Slow Drift Ambient Supervisor
         if self._outdoor_temp is not None:
             delta_t = max(0.0, self._target_temp - self._outdoor_temp)
-            base_energy_kwh = (self._effective_heat_loss * delta_t * 24.0) / 1000.0
+            base_energy_kwh = (
+                self._effective_heat_loss * self._wind_factor * delta_t * 24.0
+            ) / 1000.0
 
             # Ambient supervisor: gentle proportional trim eliminating persistent offset without integral windup
             if self._cur_temp is not None:
@@ -1117,6 +1220,32 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         elif not should_heat:
             self._demand_start_time = None
 
+        # Rule G: Peak-hour top-up run duration cap (Adaptive PWM period modulation)
+        # In peak hours, avoid deep continuous gavage at expensive grid tariffs. Once top-up reaches
+        # peak_max_run_duration (default 45 min, >= 30 min Danfoss min runtime), stop to let heat pulse diffuse.
+        if (
+            should_heat
+            and not off_peak_active
+            and self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
+            and self._cycle_start_time
+        ):
+            active_run_sec = (now_utc - self._cycle_start_time).total_seconds()
+            is_freeze_emergency = self._floor_temp is not None and self._floor_temp <= self._min_floor_temp
+            is_comfort_emergency = (
+                self._cur_temp is not None
+                and (self._target_temp - self._cur_temp) >= COMFORT_SAFETY_DEFICIT_OVERRIDE
+            )
+            if (
+                active_run_sec >= self._peak_max_run_duration.total_seconds()
+                and not is_freeze_emergency
+                and not is_comfort_emergency
+            ):
+                should_heat = False
+                self._decision_reason = (
+                    f"Peak-hour top-up cycle completed ({int(active_run_sec // 60)} min run cap reached, "
+                    f"allowing slab thermal diffusion)"
+                )
+
         # 6. Hydronic floor loop safeties (if sensor configured)
         if self._floor_temp is not None:
             if self._floor_temp >= self._max_floor_temp:
@@ -1164,6 +1293,26 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                             0.98 * self._heat_loss_measured_wk + 0.02 * sample_ua, 1
                         )
                     self._heat_loss_samples_count += 1
+
+        # 9. Experimental identification of slab transport dead time theta (inflection point)
+        if (
+            self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
+            and self._cycle_start_time
+            and self._heating_start_derivative is not None
+            and self._heating_start_derivative <= 0.0
+        ):
+            if self._temp_derivative >= 0.05:
+                # Slope reversed from cooling/flat to active warming: heat wave has traversed the slab
+                measured_theta = (now_utc - self._cycle_start_time).total_seconds() / 3600.0
+                if 0.5 <= measured_theta <= 5.0:
+                    if self._dead_time_measured_hours is None:
+                        self._dead_time_measured_hours = round(measured_theta, 2)
+                    else:
+                        self._dead_time_measured_hours = round(
+                            0.90 * self._dead_time_measured_hours + 0.10 * measured_theta, 2
+                        )
+                    self._dead_time_samples_count += 1
+                self._heating_start_derivative = None  # Measure once per cycle
 
         self.async_write_ha_state()
 
@@ -1224,6 +1373,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
+        self._heating_start_temp = self._cur_temp
+        self._heating_start_derivative = self._temp_derivative
         self._demand_start_time = None
         self._hvac_action = HVACAction.HEATING
         self._cycles_today += 1

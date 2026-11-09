@@ -38,6 +38,8 @@ async def async_get_config_entry_diagnostics(
         hours_done = getattr(thermostat, "_hours_run_today", 0.0)
         stagger = getattr(thermostat, "_stagger_delay", None)
         stagger_sec = int(stagger.total_seconds()) if stagger else 0
+        peak_dur = getattr(thermostat, "_peak_max_run_duration", None)
+        peak_dur_min = int(peak_dur.total_seconds() // 60) if peak_dur else None
 
         diagnostics_data["thermostat_live_state"] = {
             "name": getattr(thermostat, "_name", None),
@@ -52,10 +54,17 @@ async def async_get_config_entry_diagnostics(
             "decision_reason": getattr(thermostat, "_decision_reason", None),
             "temp_derivative_hourly": getattr(thermostat, "_temp_derivative", None),
             "temp_projected_ahead": getattr(thermostat, "_temp_projected", None),
+            "dead_time_hours": getattr(thermostat, "_dead_time", None),
+            "effective_dead_time_hours": getattr(thermostat, "_effective_dead_time", None),
+            "dead_time_measured_hours": getattr(thermostat, "_dead_time_measured_hours", None),
+            "dead_time_samples_count": getattr(thermostat, "_dead_time_samples_count", None),
+            "auto_calibrate_dead_time": getattr(thermostat, "_auto_calibrate_dead_time", None),
             "model_error": getattr(thermostat, "_model_error", None),
             "heat_loss_factor_wk": getattr(thermostat, "_heat_loss", None),
             "effective_heat_loss_wk": getattr(thermostat, "_effective_heat_loss", None),
             "auto_calibrate_heat_loss": getattr(thermostat, "_auto_calibrate_heat_loss", None),
+            "wind_factor": getattr(thermostat, "_wind_factor", None),
+            "wind_speed": getattr(thermostat, "_wind_speed", None),
             "compressor_power_watts": getattr(thermostat, "_power_watts", None),
             "energy_quota_24h_kwh": getattr(thermostat, "_energy_needed_kwh", None),
             "ambient_trim_ratio": getattr(thermostat, "_ambient_trim_ratio", None),
@@ -72,6 +81,7 @@ async def async_get_config_entry_diagnostics(
             "dry_run": getattr(thermostat, "_dry_run", None),
             "simulated_heater_state": getattr(thermostat, "_simulated_heater_state", None),
             "stagger_delay_sec": stagger_sec,
+            "peak_max_run_duration_min": peak_dur_min,
             "compressor_cycles_today": getattr(thermostat, "_cycles_today", None),
             "max_cycles_budget": getattr(thermostat, "_max_cycles", None),
             "extra_state_attributes": getattr(thermostat, "extra_state_attributes", {}),

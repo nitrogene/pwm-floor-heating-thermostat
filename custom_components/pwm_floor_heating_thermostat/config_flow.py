@@ -18,6 +18,7 @@ except ImportError:
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_AUTO_CALIBRATE_DEAD_TIME,
     CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
     CONF_DEAD_TIME,
@@ -32,13 +33,16 @@ from .const import (
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
     CONF_OUTDOOR_SENSOR,
+    CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
+    CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_SENSOR,
+    DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
     DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
     DEFAULT_DEAD_TIME_HOURS,
@@ -151,9 +155,16 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SOLAR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor", "weather"])
                 ),
+                vol.Optional(CONF_WIND_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor", "weather"])
+                ),
                 vol.Optional(
                     CONF_AUTO_CALIBRATE_HEAT_LOSS,
                     default=DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_CALIBRATE_DEAD_TIME,
+                    default=DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
                 ): selector.BooleanSelector(),
             }
         )
@@ -353,6 +364,12 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor", "weather"])
                 ),
+                vol.Optional(
+                    CONF_WIND_SENSOR,
+                    description={"suggested_value": curr.get(CONF_WIND_SENSOR)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor", "weather"])
+                ),
                 vol.Required(
                     CONF_AUTO_CALIBRATE_HEAT_LOSS,
                     default=bool(
@@ -362,6 +379,31 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         )
                     ),
                 ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_AUTO_CALIBRATE_DEAD_TIME,
+                    default=bool(
+                        curr.get(
+                            CONF_AUTO_CALIBRATE_DEAD_TIME,
+                            DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
+                        )
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_PEAK_MAX_RUN_DURATION,
+                    default=int(
+                        curr.get(CONF_PEAK_MAX_RUN_DURATION, 45)
+                        if isinstance(curr.get(CONF_PEAK_MAX_RUN_DURATION), (int, float))
+                        else 45
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=180,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 

@@ -214,3 +214,174 @@ def test_thermostat_extra_state_attributes_v025():
     assert attrs[ATTR_SOLAR_CREDIT_KWH] == 1.2
     assert attrs[ATTR_EFFECTIVE_HEAT_LOSS_WK] == 52.0
     assert attrs["auto_calibrate_heat_loss"] is True
+    assert attrs["peak_max_run_duration_min"] == 45
+
+
+def test_peak_hour_top_up_cycle_run_cap():
+    """Verify Rule G stops compressor when peak-hour run duration cap is reached."""
+    from custom_components.pwm_floor_heating_thermostat.const import (
+        COMFORT_SAFETY_DEFICIT_OVERRIDE,
+        FSM_RUNNING_NORMAL,
+    )
+
+    def evaluate_peak_cap(
+        should_heat: bool,
+        off_peak_active: bool,
+        fsm_state: str,
+        active_run_sec: float,
+        cap_sec: float,
+        cur_temp: float,
+        target_temp: float,
+        floor_temp: float | None = None,
+        min_floor_temp: float = 14.0,
+    ) -> bool:
+        """Evaluate Rule G logic."""
+        error = target_temp - cur_temp
+        if should_heat and not off_peak_active and fsm_state in ["running_min_lock", "running_normal"]:
+            is_freeze_emergency = floor_temp is not None and floor_temp <= min_floor_temp
+            is_comfort_emergency = error >= COMFORT_SAFETY_DEFICIT_OVERRIDE
+            if active_run_sec >= cap_sec and not is_freeze_emergency and not is_comfort_emergency:
+                return False
+        return should_heat
+
+    cap = 45.0 * 60.0  # 45 minutes
+
+    # 1. Under cap in peak hours (run 35 min) -> keeps heating
+    assert (
+        evaluate_peak_cap(
+            should_heat=True,
+            off_peak_active=False,
+            fsm_state=FSM_RUNNING_NORMAL,
+            active_run_sec=35 * 60,
+            cap_sec=cap,
+            cur_temp=18.8,
+            target_temp=19.0,
+        )
+        is True
+    )
+
+    # 2. Reached cap in peak hours (run 45 min) -> stops heating
+    assert (
+        evaluate_peak_cap(
+            should_heat=True,
+            off_peak_active=False,
+            fsm_state=FSM_RUNNING_NORMAL,
+            active_run_sec=45 * 60,
+            cap_sec=cap,
+            cur_temp=18.8,
+            target_temp=19.0,
+        )
+        is False
+    )
+
+    # 3. Reached cap but in OFF-PEAK hours (HC) -> NOT capped, allows deep accumulation
+    assert (
+        evaluate_peak_cap(
+            should_heat=True,
+            off_peak_active=True,
+            fsm_state=FSM_RUNNING_NORMAL,
+            active_run_sec=120 * 60,  # 2 hours deep charge
+            cap_sec=cap,
+            cur_temp=18.8,
+            target_temp=19.0,
+        )
+        is True
+    )
+
+    # 4. Reached cap in peak hours but severe cold deficit (comfort emergency: 18.0°C for target 19.0°C, error=1.0 >= 0.8) -> bypasses cap
+    assert (
+        evaluate_peak_cap(
+            should_heat=True,
+            off_peak_active=False,
+            fsm_state=FSM_RUNNING_NORMAL,
+            active_run_sec=50 * 60,
+            cap_sec=cap,
+            cur_temp=18.0,
+            target_temp=19.0,
+        )
+        is True
+    )
+
+    # 5. Reached cap in peak hours but floor frost emergency (12.0°C <= 14.0°C) -> bypasses cap
+    assert (
+        evaluate_peak_cap(
+            should_heat=True,
+            off_peak_active=False,
+            fsm_state=FSM_RUNNING_NORMAL,
+            active_run_sec=50 * 60,
+            cap_sec=cap,
+            cur_temp=18.8,
+            target_temp=19.0,
+            floor_temp=12.0,
+        )
+        is True
+    )
+
+
+def test_wind_convective_amplification():
+    """Verify wind speed convective heat loss factor scaling and clamping [1.0, 1.25]."""
+    from custom_components.pwm_floor_heating_thermostat.const import (
+        WIND_AMPLIFICATION_GAIN,
+        WIND_MAX_AMPLIFICATION,
+        WIND_SPEED_CALM_THRESHOLD,
+    )
+
+    def calculate_wind_factor(wind_speed: float | None) -> float:
+        if wind_speed is None or wind_speed <= WIND_SPEED_CALM_THRESHOLD:
+            return 1.0
+        excess = wind_speed - WIND_SPEED_CALM_THRESHOLD
+        return round(min(WIND_MAX_AMPLIFICATION, 1.0 + WIND_AMPLIFICATION_GAIN * excess), 3)
+
+    # 1. Calm wind (10 km/h <= 15 km/h) -> 1.0
+    assert calculate_wind_factor(10.0) == 1.0
+
+    # 2. Moderate wind (35 km/h) -> excess 20 km/h * 0.005 = +10% -> 1.10
+    assert calculate_wind_factor(35.0) == 1.10
+
+    # 3. Strong wind (55 km/h) -> excess 40 km/h * 0.005 = +20% -> 1.20
+    assert calculate_wind_factor(55.0) == 1.20
+
+    # 4. Severe storm (85 km/h) -> clamped at +25% -> 1.25
+    assert calculate_wind_factor(85.0) == 1.25
+
+    # 5. Missing / None -> 1.0
+    assert calculate_wind_factor(None) == 1.0
+
+
+def test_dead_time_soft_adaptation():
+    """Verify dead time soft self-adaptation calculation and strict +/-25% bounds."""
+    from custom_components.pwm_floor_heating_thermostat.const import (
+        DEAD_TIME_MAX_DEVIATION,
+        DEAD_TIME_MIN_SAMPLES,
+    )
+
+    def calculate_effective_dead_time(
+        base_theta: float,
+        auto_calibrate: bool,
+        measured_theta: float | None,
+        samples_count: int,
+    ) -> float:
+        if not auto_calibrate or measured_theta is None or samples_count < DEAD_TIME_MIN_SAMPLES:
+            return base_theta
+        min_d = round((1.0 - DEAD_TIME_MAX_DEVIATION) * base_theta, 2)
+        max_d = round((1.0 + DEAD_TIME_MAX_DEVIATION) * base_theta, 2)
+        return round(max(min_d, min(max_d, measured_theta)), 2)
+
+    base = 2.25
+
+    # 1. Disabled -> strictly baseline
+    assert calculate_effective_dead_time(base, auto_calibrate=False, measured_theta=2.5, samples_count=5) == 2.25
+
+    # 2. Enabled but insufficient samples (< 3) -> strictly baseline
+    assert calculate_effective_dead_time(base, auto_calibrate=True, measured_theta=2.5, samples_count=2) == 2.25
+
+    # 3. Enabled with 3+ samples and valid measurement (2.4h) -> adapts to 2.4h
+    assert calculate_effective_dead_time(base, auto_calibrate=True, measured_theta=2.40, samples_count=4) == 2.40
+
+    # 4. Enabled with abnormally high measurement (3.5h > 2.81h) -> clamped to +25% (2.81h)
+    assert calculate_effective_dead_time(base, auto_calibrate=True, measured_theta=3.50, samples_count=4) == 2.81
+
+    # 5. Enabled with abnormally low measurement (1.0h < 1.69h) -> clamped to -25% (1.69h)
+    assert calculate_effective_dead_time(base, auto_calibrate=True, measured_theta=1.00, samples_count=4) == 1.69
+
+

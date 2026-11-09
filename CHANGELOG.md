@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.6] - 2026-11-09
+
+### Added
+- **Adaptive PWM Period Modulation & Peak-Hour Run Cap (Rule G)**:
+  - Asymmetric duration scheduling between tariff windows: promotes deep, continuous multi-hour accumulation cycles during cheap Off-Peak hours while enforcing a bounded run cap during expensive Peak hours.
+  - Configurable `peak_max_run_duration` (default: 45 minutes, selectable 30-180 min in Options Flow) automatically terminating top-up cycles once the cap is reached to allow injected heat pulses to diffuse through the slab.
+  - Fully compliant with Danfoss minimum 30-minute runtime requirement.
+  - Automatic comfort emergency bypass (if room deficit $\ge 0.8^\circ\text{C}$) and floor frost protection bypass ($\le 14^\circ\text{C}$).
+  - Exposed via `peak_max_run_duration_min` telemetry attribute and companion diagnostics.
+- **Wind Convective Heat Loss Amplification (`wind_sensor`)**:
+  - Optional `wind_sensor` input integrating ambient wind speed into the 24h thermal energy quota.
+  - Above calm conditions ($15\text{ km/h}$), applies $+0.5\%\text{ /km/h}$ convective loss boost up to a strict $+25\%$ maximum ceiling.
+  - Disabled by default (sensor unset, multiplier 1.0).
+  - Exposed via `wind_factor` and `wind_speed` telemetry attributes.
+- **Dynamic Calibration & Soft Adaptation of Slab Dead Time $\theta$ (`auto_calibrate_dead_time`)**:
+  - Automatically identifies experimental transport dead time by detecting the temperature slope reversal point upon heating cycles.
+  - Computes rolling average `dead_time_measured_hours` via 90/10 exponential filter with sample counter.
+  - Optional `auto_calibrate_dead_time: bool` (disabled by default) adjusting trajectory projection within a safe $\pm 25\%$ clamp of baseline configured $\theta$.
+  - Exposed via `effective_dead_time_hours`, `dead_time_measured_hours`, and `dead_time_samples_count`.
+
+---
+
 ## [0.2.5] - 2026-11-09
 
 ### Added

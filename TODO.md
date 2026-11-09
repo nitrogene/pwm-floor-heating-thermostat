@@ -11,12 +11,12 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
   - [x] Projected ahead temperature calculation: $T_{\text{proj}}(t + \theta) = T_{\text{amb}}(t) + \theta \cdot \frac{dT_{\text{amb}}}{dt}$.
   - [x] Inflection point detection (morning cold dip) $\theta$ hours ahead to trigger heating before ambient drops below target setpoint.
   - [x] Telemetry attributes exposure: `temp_derivative_hourly` and `temp_projected_ahead`.
-- [ ] **Dynamic Heat Gains & Environmental Losses:**
-  - [ ] Wind integration (convective envelope heat loss amplification).
+- [x] **Dynamic Heat Gains & Environmental Losses:**
+  - [x] **Wind Convective Loss Amplification (`wind_sensor`):** Optional wind speed integration scaling building heat loss above 15 km/h (+0.5%/km/h, clamped to max +25%).
   - [x] **Solar Irradiance Integration with Morning Comfort Guard (`solar_sensor`):** Daytime solar gain deduction bounded by max 25% quota reduction, with inviolable 0h-9h morning comfort guard preventing under-heated morning wake-up.
 - [ ] **Inter-Zone Convective Coupling:**
   - [ ] Model passive thermal heat transfers between adjacent open spaces (e.g. warm air convective draft from Living Room to Mezzanine/Office).
-  - [ ] Multi-zone electrical coordinator to smooth grid power draws (preventing simultaneous starts).
+  - [x] **Multi-Zone Electrical Coordinator (`stagger_delay`):** Smooths grid power draws by staggering startup sequences across zones (preventing simultaneous 13 kW inrush).
 - [x] **Self-Calibration & Continuous Learning:**
   - [x] Periodic heat loss estimation $H = U \cdot A$ (W/K) via passive unheated night decay periods.
   - [x] **Mode A (Advisory Passive Telemetry):** Telemetry attribute `heat_loss_measured_wk` showing real-world measured building heat loss without altering active control.
@@ -24,7 +24,7 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
     - [x] Strict validation conditions (minimum 3 validated night decay samples).
     - [x] Slow exponential smoothing IIR filter preventing sudden jumps.
     - [x] Hard bounds clamped to $\pm 20\%$ of baseline configured $H$.
-  - [ ] Dynamic calibration of slab time constant $\tau$ and dead time $\theta$ (Future).
+  - [x] **Dynamic Calibration of Slab Dead Time $\theta$ (`auto_calibrate_dead_time`):** Experimental inflection point identification on active heating cycles with exponential filtering and optional $\pm 25\%$ soft adaptation.
 
 ---
 
@@ -67,7 +67,7 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
   - [x] Absolute comfort fallback override (forces startup if setpoint deficit $\ge 0.8$°C).
 - [ ] **Advanced Dynamic Tariffs & Multi-Rate Schedulers (Future Roadmap):**
   - [ ] Dynamic hourly spot-market tariff integration (EPEX Spot, NordPool, French EDF Tempo 6-color matrix).
-  - [ ] Adaptive PWM period modulation (e.g. 3h deep accumulation cycles in Off-Peak vs 45 min top-up cycles in Peak hours).
+  - [x] **Adaptive PWM Period Modulation (`peak_max_run_duration`):** Deep multi-hour accumulation cycles in Off-Peak vs 45 min capped top-up cycles in Peak hours with thermal diffusion pauses.
 - [x] **Slow Drift Ambient Supervisor (Anti-Integral Windup):**
   - [x] Gentle and bounded proportional trim on the 24h daily energy quota ($K_{\text{ambient}} = 0.15\text{ /}^\circ\text{C}$, clamped $[0.80, 1.25]$).
   - [x] Permanent elimination of continuous divergent integrator windup and steady-state offsets.
