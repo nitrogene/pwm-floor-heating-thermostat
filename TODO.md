@@ -127,9 +127,9 @@ This document tracks the technical roadmap, algorithmic specifications, and deve
   - [x] Synchronized `strings.json` and translations (`translations/fr.json`, `translations/en.json`).
   - [x] Connected entry setup and unload handlers (`async_setup_entry`, `async_unload_entry`) in `__init__.py` and `climate.py`.
   - [x] Dedicated unit test suite (`tests/test_config_flow.py`, `tests/test_diagnostics.py`).
-- [ ] **Official HACS Default Submission (PR on hacs/default) [Priority 2]:**
+- [x] **Official HACS Default Submission (PR on hacs/default) [Priority 2]:**
   - [x] **Field Soak Test & Real-World Telemetry:** Validated on 24h real-world cycle across 3 zones (aeration freeze, Kalata quantization filtering, overshoot prevention, off-peak precharge).
   - [x] **UI Journey Screenshots:** HACS installation, Config Flow step-by-step, device card, and integration hub for documentation (`README.md`).
   - [x] **Final HACS Submission Gate:** 100% green CI (Hassfest, HACS, Ruff, Pytest), brand assets (icon, logo).
   - [x] **Submit Pull Request:** Open PR on official community repository `hacs/default` ([PR #13790](https://github.com/hacs/default/pull/13790)).
-  - [ ] **Public Directory Listing:** In review queue by HACS maintainers for 1-click community installation.
+  - [x] **Public Directory Listing:** Approved and merged into official community repository `hacs/default` by @frenck! 1-click installation available worldwide in Home Assistant.

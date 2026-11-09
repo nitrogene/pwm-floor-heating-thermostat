@@ -1,6 +1,6 @@
 # PWM Floor Heating Thermostat for Home Assistant
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?logo=homeassistant&logoColor=white)](https://github.com/hacs/default)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-blue.svg?logo=homeassistant&logoColor=white)](https://github.com/hacs/default)
 [![License](https://img.shields.io/github/license/nitrogene/pwm-floor-heating-thermostat)](https://github.com/nitrogene/pwm-floor-heating-thermostat/blob/main/LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/nitrogene/pwm-floor-heating-thermostat?logo=github&logoColor=white)](https://github.com/nitrogene/pwm-floor-heating-thermostat/releases)
 
@@ -84,12 +84,15 @@ The slab acts as a physical low-pass thermal filter. The outdoor temperature tha
 
 ### Via HACS (Recommended)
 
+As an official integration included in the HACS default catalog:
+
 1. Open **HACS** in your Home Assistant instance.
-2. Click the three dots in the top right corner and select **Custom repositories**.
-3. Add `https://github.com/nitrogene/pwm-floor-heating-thermostat` as an **Integration**.
-4. Click **Download**, then restart Home Assistant.
+2. Search for **PWM Floor Heating Thermostat** under the **Integrations** tab.
+3. Click **Download**, then restart Home Assistant.
 
 ![HACS Download](images/marketplace_install.png)
+
+> *Optional fallback:* If not yet indexed in your local HACS cache, click the three dots ⋮ in the top right corner -> **Custom repositories** -> add `https://github.com/nitrogene/pwm-floor-heating-thermostat` as an **Integration**.
 
 ### Manual Installation
 
