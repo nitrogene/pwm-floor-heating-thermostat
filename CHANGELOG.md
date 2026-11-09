@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.4] - 2026-11-09
+
+### Fixed
+- **FSM Deferred Shutdown on HVAC OFF**:
+  - Resolved critical issue where requesting `HVACMode.OFF` while compressor was in `FSM_RUNNING_MIN_LOCK` caused premature loop exit, leaving the physical compressor running indefinitely.
+  - Periodic control loop now maintains safe shutdown tracking until the 30-minute minimum runtime elapses, properly turning off the actuator and entering `FSM_WAITING_MIN_OFF`.
+- **Enforce Daily Compressor Cycle Budget (`max_cycles_per_day`)**:
+  - Applied Danfoss mechanical anti-fatigue constraint in `_async_start_heating_safe` (denies startup once `_cycles_today >= _max_cycles`), with safety override for floor frost protection.
+- **Diagnostics Dump Field Alignment (`diagnostics.py`)**:
+  - Re-aligned internal entity attribute names in diagnostics export (`_temp_derivative`, `_temp_projected`, `_energy_needed_kwh`, `_hours_needed_24h`, `_hours_run_today`, `_quota_blocked`, `_window_open`, `_cycles_today`), eliminating null values in "Download diagnostics".
+- **Resilient Reboot FSM State & Counters Restoration**:
+  - On Home Assistant restart during an active run cycle, safely transitions to `WAITING_MIN_OFF` to enforce mandatory refrigerant pressure equalization before allowing any restart.
+  - Added datation stamp (`counters_date`) to daily cycle and run hour counters to prevent carrying over stale counters from previous days after overnight downtime.
+- **Midnight Counters Reset in OFF Mode**:
+  - Evaluated daily midnight counter reset prior to HVAC mode evaluation, ensuring cycles and operating hours reset cleanly even if the thermostat is turned OFF for days.
+
+### Added
+- **Modern Home Assistant Compliance**:
+  - Added `ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF` in `supported_features` for full Home Assistant 2024.2+ compatibility.
+  - Declared `_attr_min_temp = 16.0` and `_attr_max_temp = 26.0` properties restricting UI setpoint slider to floor heating operational ranges.
+  - Migrated `iot_class` from `local_polling` to `local_push` in `manifest.json`.
+  - Added `heater_required_unless_dry_run` validation check in Config Flow.
+- **Defensive Error Handling & CI Concurrency**:
+  - Wrapped physical switch service calls (`turn_on` / `turn_off`) in `try...except Exception` blocks to prevent unhandled service exceptions.
+  - Added GitHub Actions concurrency controls and least-privilege read permissions in `validate.yaml`.
+
+---
+
 ## [0.2.3] - 2026-11-09
 
 ### Added

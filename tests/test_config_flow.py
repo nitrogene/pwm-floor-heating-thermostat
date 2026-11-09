@@ -79,6 +79,26 @@ def test_config_flow_missing_sensors():
     asyncio.run(_test())
 
 
+def test_config_flow_heater_required_when_not_dry_run():
+    """Verify error if heater switch is missing when dry_run is False."""
+
+    async def _test():
+        flow = PwmFloorHeatingConfigFlow()
+        user_input = {
+            CONF_NAME: "Salon Thermostat",
+            CONF_TARGET_SENSOR: "sensor.temp_salon",
+            CONF_OUTDOOR_SENSOR: "sensor.temp_ext",
+            CONF_DRY_RUN: False,
+            CONF_HEATER: None,
+        }
+
+        result = await flow.async_step_user(user_input=user_input)
+        assert result["type"] == "form"
+        assert result["errors"][CONF_HEATER] == "heater_required_unless_dry_run"
+
+    asyncio.run(_test())
+
+
 def test_config_flow_success():
     """Verify successful entry creation with unique identifier."""
 

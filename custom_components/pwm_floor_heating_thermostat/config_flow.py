@@ -9,7 +9,12 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+
+try:
+    from homeassistant.config_entries import ConfigFlowResult, OptionsFlowResult
+except ImportError:
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult  # type: ignore[assignment]
+    from homeassistant.data_entry_flow import FlowResult as OptionsFlowResult  # type: ignore[assignment]
 from homeassistant.helpers import selector
 
 from .const import (
@@ -57,7 +62,7 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial user step."""
         errors: dict[str, str] = {}
 
@@ -69,6 +74,8 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_TARGET_SENSOR] = "missing_target_sensor"
             if not outdoor_sensor:
                 errors[CONF_OUTDOOR_SENSOR] = "missing_outdoor_sensor"
+            if not user_input.get(CONF_DRY_RUN) and not user_input.get(CONF_HEATER):
+                errors[CONF_HEATER] = "heater_required_unless_dry_run"
 
             if not errors:
                 unique_key = (
@@ -173,7 +180,7 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> OptionsFlowResult:
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)

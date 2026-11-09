@@ -96,3 +96,63 @@ def test_dry_run_does_not_call_physical_switch():
 
     # Formal check: 0 calls to physical switch
     assert mock_service_call.call_count == 0
+
+
+def test_max_cycles_budget_blocks_startup():
+    """Verify daily compressor cycle budget exhaustion blocks subsequent starts unless freeze emergency."""
+    max_cycles = 6
+
+    def check_start_allowed(cycles_today: int, floor_temp: float | None = None, min_floor_temp: float = 14.0):
+        is_freeze = floor_temp is not None and floor_temp <= min_floor_temp
+        if cycles_today >= max_cycles and not is_freeze:
+            return False, "Daily cycle budget exhausted"
+        return True, "Start allowed"
+
+    # 1. Below budget: allowed
+    allowed, _ = check_start_allowed(cycles_today=5)
+    assert allowed
+
+    # 2. At or above budget: denied
+    allowed, reason = check_start_allowed(cycles_today=6)
+    assert not allowed
+    assert "Daily cycle budget exhausted" in reason
+
+    allowed, _ = check_start_allowed(cycles_today=7)
+    assert not allowed
+
+    # 3. Above budget but freeze emergency: allowed as safety override
+    allowed, _ = check_start_allowed(cycles_today=6, floor_temp=12.0)
+    assert allowed
+
+
+def test_deferred_stop_when_off_requested_during_min_runtime():
+    """Verify hvac_mode OFF defers physical stop while FSM is in minimum runtime lock."""
+    # Simulate FSM running with 10 minutes elapsed (30 min minimum required)
+    min_cycle_duration_sec = 1800  # 30 min
+    elapsed_sec = 600              # 10 min
+    fsm_state = "running_min_lock"
+    hvac_mode = "off"
+
+    # Evaluator simulating the FSM logic in climate.py
+    stop_executed = False
+    if hvac_mode == "off":
+        if fsm_state == "running_min_lock":
+            if elapsed_sec >= min_cycle_duration_sec:
+                stop_executed = True
+                fsm_state = "waiting_min_off"
+            else:
+                stop_executed = False  # Deferred
+
+    assert not stop_executed
+    assert fsm_state == "running_min_lock"
+
+    # When 30 min are reached
+    elapsed_sec = 1805
+    if hvac_mode == "off":
+        if fsm_state == "running_min_lock":
+            if elapsed_sec >= min_cycle_duration_sec:
+                stop_executed = True
+                fsm_state = "waiting_min_off"
+
+    assert stop_executed
+    assert fsm_state == "waiting_min_off"

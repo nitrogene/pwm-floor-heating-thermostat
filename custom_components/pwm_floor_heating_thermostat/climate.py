@@ -51,6 +51,8 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_COUNTERS_DATE,
+    COMFORT_SAFETY_DEFICIT_OVERRIDE,
     CONF_AWAY_TEMP,
     CONF_COMFORT_TEMP,
     CONF_DEAD_TIME,
@@ -87,9 +89,11 @@ from .const import (
     DEFAULT_HEAT_LOSS,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
+    DEFAULT_MAX_TEMP,
     DEFAULT_MIN_CYCLE,
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_MIN_OFF,
+    DEFAULT_MIN_TEMP,
     DEFAULT_NAME,
     DEFAULT_POWER_WATTS,
     DEFAULT_SLAB_TAU_HOURS,
@@ -103,6 +107,10 @@ from .const import (
     FSM_RUNNING_MIN_LOCK,
     FSM_RUNNING_NORMAL,
     FSM_WAITING_MIN_OFF,
+    OUTDOOR_PRECHARGE_MAX_TEMP,
+    POST_AIRING_MAX_DERIVATIVE,
+    POST_AIRING_RECOVERY_MINUTES,
+    WINDOW_DERIVATIVE_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -192,9 +200,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     _attr_precision = PRECISION_TENTHS
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.PRESET_MODE
+        | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.TURN_OFF
+    )
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_preset_modes = [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
+    _attr_min_temp = DEFAULT_MIN_TEMP
+    _attr_max_temp = DEFAULT_MAX_TEMP
 
     def __init__(self, hass: HomeAssistant, config: ConfigType, entry: ConfigEntry | None = None) -> None:
         """Initialize the thermostat entity."""
@@ -301,9 +316,26 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._hvac_mode = HVACMode(old_state.state)
 
             old_attrs = old_state.attributes
-            self._fsm_state = old_attrs.get("fsm_state", FSM_IDLE)
-            self._cycles_today = old_attrs.get("compressor_cycles_today", 0)
-            self._hours_run_today = old_attrs.get("heating_hours_done_today", 0.0)
+            restored_fsm = old_attrs.get("fsm_state", FSM_IDLE)
+            if restored_fsm in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+                self._fsm_state = FSM_WAITING_MIN_OFF
+                self._last_state_change = dt_util.utcnow()
+                _LOGGER.warning(
+                    "Thermostat %s restored after reboot during active running state. "
+                    "Safely transitioned to WAITING_MIN_OFF to enforce Danfoss pressure equalization.",
+                    self.name,
+                )
+            else:
+                self._fsm_state = restored_fsm
+
+            saved_date = old_attrs.get(ATTR_COUNTERS_DATE)
+            today_str = str(dt_util.now().date())
+            if saved_date == today_str:
+                self._cycles_today = old_attrs.get("compressor_cycles_today", 0)
+                self._hours_run_today = old_attrs.get("heating_hours_done_today", 0.0)
+            else:
+                self._cycles_today = 0
+                self._hours_run_today = 0.0
             if "temp_derivative_hourly" in old_attrs and old_attrs["temp_derivative_hourly"] is not None:
                 try:
                     self._temp_derivative = float(old_attrs["temp_derivative_hourly"])
@@ -419,7 +451,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.3",
+                sw_version="0.2.4",
             )
         return None
 
@@ -552,6 +584,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "away_temp": self._away_temp,
             "stagger_delay_sec": int(self._stagger_delay.total_seconds()),
             "compressor_cycles_today": self._cycles_today,
+            "max_cycles_budget": self._max_cycles,
+            ATTR_COUNTERS_DATE: str(dt_util.now().date()),
             "min_cycle_lock_remaining_sec": min_on_rem,
             "min_off_lock_remaining_sec": min_off_rem,
             "off_peak_active": off_peak_active,
@@ -724,7 +758,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 if recent_temps and self._cur_temp is not None:
                     max_recent = max(recent_temps)
                     drop = max_recent - self._cur_temp
-                    if drop >= self._window_drop_threshold or (self._temp_derivative <= -1.5 and drop >= 0.2):
+                    if drop >= self._window_drop_threshold or (self._temp_derivative <= WINDOW_DERIVATIVE_THRESHOLD and drop >= 0.2):
                         self._window_open = True
                         self._window_open_time = now_utc
                         _LOGGER.warning(
@@ -745,7 +779,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         # Detect window closure transition to initiate thermal rebound damping
         if self._was_window_open and not self._window_open:
-            self._window_recovery_until = now + timedelta(minutes=30)
+            self._window_recovery_until = now + timedelta(minutes=POST_AIRING_RECOVERY_MINUTES)
             # Reset derivative on window closure: air warming back against slab is not slab overheating
             self._temp_derivative = 0.0
         self._was_window_open = self._window_open
@@ -800,7 +834,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             effective_deriv = 0.0
         elif in_recovery:
             # Post-airing rebound: cold air warms back against warm surfaces, clamp positive derivative
-            effective_deriv = min(0.05, max(-0.5, self._temp_derivative))
+            effective_deriv = min(POST_AIRING_MAX_DERIVATIVE, max(-0.5, self._temp_derivative))
         else:
             effective_deriv = self._temp_derivative
 
@@ -861,17 +895,22 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     async def _async_control_heating(self, now: datetime | None = None) -> None:
         """Main algorithmic loop: thermodynamic energy balance and model-based scheduling."""
-        if self._hvac_mode == HVACMode.OFF:
-            return
-
         now_utc = dt_util.utcnow()
 
-        # Midnight daily counter reset
+        # Midnight daily counter reset (evaluated unconditionally regardless of mode)
         today = dt_util.now().date()
         if today != self._last_day_reset:
             self._hours_run_today = 0.0
             self._cycles_today = 0
             self._last_day_reset = today
+            _LOGGER.info("Midnight daily counters reset for %s", self.name)
+
+        if self._hvac_mode == HVACMode.OFF:
+            # If compressor is in running state, ensure safe shutdown once min cycle is fulfilled
+            if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+                await self._async_stop_heating_safe()
+                self.async_write_ha_state()
+            return
 
         # Update FSM state transitions based on elapsed lock durations
         elapsed = (now_utc - self._last_state_change).total_seconds()
@@ -911,7 +950,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
             # Rule A: Priority thermal precharge during Off-Peak hours
             if off_peak_active:
-                if error >= -0.5 and self._outdoor_temp <= 12.0:
+                if error >= -0.5 and self._outdoor_temp <= OUTDOOR_PRECHARGE_MAX_TEMP:
                     should_heat = True
                     self._decision_reason = (
                         f"Off-peak thermal precharge (ext: {self._outdoor_temp}°C, "
@@ -951,7 +990,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._quota_blocked = False
 
             if should_heat and not off_peak_active and quota_enforcement_active and quota_exceeded:
-                if error < 0.8:
+                if error < COMFORT_SAFETY_DEFICIT_OVERRIDE:
                     should_heat = False
                     self._quota_blocked = True
                     self._decision_reason = (
@@ -1036,6 +1075,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
             return
 
+        # Check daily compressor cycle budget (Danfoss anti-fatigue)
+        is_freeze_emergency = self._floor_temp is not None and self._floor_temp <= self._min_floor_temp
+        if self._cycles_today >= self._max_cycles and not is_freeze_emergency:
+            _LOGGER.info(
+                "Start denied: daily compressor cycle budget exhausted (%d / %d). Next budget at midnight.",
+                self._cycles_today,
+                self._max_cycles,
+            )
+            self._decision_reason = (
+                f"Daily cycle budget exhausted ({self._cycles_today}/{self._max_cycles}). "
+                "Next budget at midnight."
+            )
+            return
+
         if self._fsm_state == FSM_WAITING_MIN_OFF:
             elapsed = (now - self._last_state_change).total_seconds()
             if elapsed < self._min_off_duration.total_seconds():
@@ -1061,9 +1114,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if self._heater_entity:
                 domain = self._heater_entity.split(".")[0]
                 _LOGGER.info("Physical compressor start: %s", self._heater_entity)
-                await self.hass.services.async_call(
-                    domain, "turn_on", {"entity_id": self._heater_entity}, blocking=True
-                )
+                try:
+                    await self.hass.services.async_call(
+                        domain, "turn_on", {"entity_id": self._heater_entity}, blocking=False
+                    )
+                except Exception as err:
+                    _LOGGER.error("Failed to turn on heater entity %s: %s", self._heater_entity, err)
+                    return
 
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
@@ -1104,9 +1161,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if self._heater_entity:
                 domain = self._heater_entity.split(".")[0]
                 _LOGGER.info("Physical compressor stop: %s", self._heater_entity)
-                await self.hass.services.async_call(
-                    domain, "turn_off", {"entity_id": self._heater_entity}, blocking=True
-                )
+                try:
+                    await self.hass.services.async_call(
+                        domain, "turn_off", {"entity_id": self._heater_entity}, blocking=False
+                    )
+                except Exception as err:
+                    _LOGGER.error("Failed to turn off heater entity %s: %s", self._heater_entity, err)
 
         if self._cycle_start_time:
             run_sec = (now - self._cycle_start_time).total_seconds()

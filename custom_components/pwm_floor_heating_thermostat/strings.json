@@ -22,7 +22,8 @@
     },
     "error": {
       "missing_target_sensor": "An ambient temperature sensor is required.",
-      "missing_outdoor_sensor": "An outdoor temperature sensor is required."
+      "missing_outdoor_sensor": "An outdoor temperature sensor is required.",
+      "heater_required_unless_dry_run": "A physical heater switch is required when Simulation / Shadow Mode is disabled."
     },
     "abort": {
       "already_configured": "This thermostat or sensor is already configured."

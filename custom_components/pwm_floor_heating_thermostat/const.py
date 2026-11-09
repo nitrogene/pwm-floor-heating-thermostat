@@ -83,4 +83,11 @@ FSM_IDLE = "idle"
 FSM_RUNNING_MIN_LOCK = "running_min_lock"        # Heating active, locked for Danfoss 30 min minimum runtime
 FSM_RUNNING_NORMAL = "running_normal"            # Heating active, beyond 30 min minimum runtime
 FSM_WAITING_MIN_OFF = "waiting_min_off"          # Heating stopped, locked for 15 min pressure equalization
-FSM_ERROR_SAFETY = "error_safety"
+
+# Thermodynamic operational thresholds & constants
+OUTDOOR_PRECHARGE_MAX_TEMP = 12.0               # Outdoor cutoff above which off-peak precharge is inhibited (°C)
+COMFORT_SAFETY_DEFICIT_OVERRIDE = 0.8           # Room deficit below target that overrides peak-hour quota block (°C)
+WINDOW_DERIVATIVE_THRESHOLD = -1.5              # Negative hourly derivative threshold for rapid ventilation (°C/h)
+POST_AIRING_RECOVERY_MINUTES = 30               # Post-ventilation thermal recovery damping window (minutes)
+POST_AIRING_MAX_DERIVATIVE = 0.05               # Max allowed positive derivative during post-airing recovery (°C/h)
+ATTR_COUNTERS_DATE = "counters_date"

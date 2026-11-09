@@ -22,7 +22,8 @@
     },
     "error": {
       "missing_target_sensor": "Une sonde de température ambiante est obligatoire.",
-      "missing_outdoor_sensor": "Une sonde de température extérieure est obligatoire."
+      "missing_outdoor_sensor": "Une sonde de température extérieure est obligatoire.",
+      "heater_required_unless_dry_run": "Un actionneur physique (relais) est obligatoire lorsque le mode Simulation / Shadow est désactivé."
     },
     "abort": {
       "already_configured": "Ce thermostat ou cette sonde est déjà configuré."

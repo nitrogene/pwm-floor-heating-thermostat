@@ -34,6 +34,11 @@ async def async_get_config_entry_diagnostics(
     thermostat = thermostats.get(entry.entry_id)
 
     if thermostat:
+        hours_needed = getattr(thermostat, "_hours_needed_24h", 0.0)
+        hours_done = getattr(thermostat, "_hours_run_today", 0.0)
+        stagger = getattr(thermostat, "_stagger_delay", None)
+        stagger_sec = int(stagger.total_seconds()) if stagger else 0
+
         diagnostics_data["thermostat_live_state"] = {
             "name": getattr(thermostat, "_name", None),
             "unique_id": getattr(thermostat, "_unique_id", None),
@@ -45,25 +50,27 @@ async def async_get_config_entry_diagnostics(
             "outdoor_temperature": getattr(thermostat, "_outdoor_temp", None),
             "floor_temperature": getattr(thermostat, "_floor_temp", None),
             "decision_reason": getattr(thermostat, "_decision_reason", None),
-            "temp_derivative_hourly": getattr(thermostat, "_temp_derivative_hourly", None),
-            "temp_projected_ahead": getattr(thermostat, "_temp_projected_ahead", None),
+            "temp_derivative_hourly": getattr(thermostat, "_temp_derivative", None),
+            "temp_projected_ahead": getattr(thermostat, "_temp_projected", None),
             "model_error": getattr(thermostat, "_model_error", None),
             "heat_loss_factor_wk": getattr(thermostat, "_heat_loss", None),
             "compressor_power_watts": getattr(thermostat, "_power_watts", None),
-            "energy_quota_24h_kwh": getattr(thermostat, "_energy_quota_24h_kwh", None),
-            "heating_hours_needed_24h": getattr(thermostat, "_heating_hours_needed_24h", None),
-            "heating_hours_done_today": getattr(thermostat, "_heating_hours_done_today", None),
-            "heating_hours_remaining_24h": getattr(thermostat, "_heating_hours_remaining_24h", None),
+            "energy_quota_24h_kwh": getattr(thermostat, "_energy_needed_kwh", None),
+            "heating_hours_needed_24h": hours_needed,
+            "heating_hours_done_today": hours_done,
+            "heating_hours_remaining_24h": round(max(0.0, hours_needed - hours_done), 2),
             "daily_quota_enforced": getattr(thermostat, "_enforce_daily_quota", None),
-            "daily_quota_blocked": getattr(thermostat, "_daily_quota_blocked", None),
-            "window_detection_active": getattr(thermostat, "_window_detection_active", None),
-            "window_open_detected": getattr(thermostat, "_window_open_detected", None),
+            "daily_quota_blocked": getattr(thermostat, "_quota_blocked", None),
+            "window_detection_active": getattr(thermostat, "_window_detection_enabled", None),
+            "window_open_detected": getattr(thermostat, "_window_open", None),
             "heat_loss_measured_wk": getattr(thermostat, "_heat_loss_measured_wk", None),
             "heat_loss_samples_count": getattr(thermostat, "_heat_loss_samples_count", None),
             "dry_run": getattr(thermostat, "_dry_run", None),
             "simulated_heater_state": getattr(thermostat, "_simulated_heater_state", None),
-            "stagger_delay_sec": getattr(thermostat, "_stagger_delay_sec", None),
-            "compressor_cycles_today": getattr(thermostat, "_compressor_cycles_today", None),
+            "stagger_delay_sec": stagger_sec,
+            "compressor_cycles_today": getattr(thermostat, "_cycles_today", None),
+            "max_cycles_budget": getattr(thermostat, "_max_cycles", None),
+            "extra_state_attributes": getattr(thermostat, "extra_state_attributes", {}),
         }
 
     return async_redact_data(diagnostics_data, TO_REDACT)
