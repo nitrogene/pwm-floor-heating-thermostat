@@ -1,4 +1,4 @@
-"""Support des diagnostics pour PWM Floor Heating Thermostat."""
+"""Diagnostics support for PWM Floor Heating Thermostat."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ try:
     from homeassistant.components.diagnostics import async_redact_data
 except ImportError:
     def async_redact_data(data: dict[str, Any], to_redact: list[str]) -> dict[str, Any]:
-        """Fallback transparent si components.diagnostics n'est pas importable directement."""
+        """Transparent fallback if components.diagnostics cannot be imported directly."""
         return data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -21,7 +21,7 @@ TO_REDACT: list[str] = []
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
-    """Retourne les données de diagnostic pour une entrée de configuration."""
+    """Return diagnostic data for a config entry."""
     diagnostics_data: dict[str, Any] = {
         "entry_id": entry.entry_id,
         "title": entry.title,
@@ -29,7 +29,7 @@ async def async_get_config_entry_diagnostics(
         "options": dict(entry.options),
     }
 
-    # Récupération de l'état en direct du thermostat si disponible
+    # Retrieve live thermostat state if registered
     thermostats = hass.data.get(DOMAIN, {})
     thermostat = thermostats.get(entry.entry_id)
 

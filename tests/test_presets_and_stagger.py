@@ -1,4 +1,4 @@
-"""Tests unitaires pour les modes Presets (Comfort, Eco, Away) et le déphasage Anti-Pic Multi-Zones."""
+"""Unit tests for presets (Comfort, Eco, Away) and multi-zone staggered startup delay."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -15,8 +15,8 @@ def evaluate_preset_and_stagger(
     demand_start_time: datetime | None,
     now: datetime,
 ) -> tuple[float, bool, str, datetime | None]:
-    """Simule la sélection de consigne selon le preset et le filtre de déphasage."""
-    # 1. Consigne active
+    """Simulate target temperature selection based on active preset and stagger delay filter."""
+    # 1. Active target temperature
     if active_preset == "eco":
         target = eco_temp
     elif active_preset == "away":
@@ -24,7 +24,7 @@ def evaluate_preset_and_stagger(
     else:
         target = comfort_temp
 
-    # 2. Demande de chauffe
+    # 2. Heating demand
     error = target - cur_temp
     projected_error = target - temp_projected
     should_heat = False
@@ -34,7 +34,7 @@ def evaluate_preset_and_stagger(
         should_heat = True
         reason = f"Heating needed for {target}°C"
 
-    # 3. Règle F : Déphasage anti-pic
+    # 3. Rule F: Staggered anti-inrush peak startup delay
     new_demand_start = demand_start_time
     if should_heat and fsm_state == "idle" and stagger_delay_sec > 0:
         if new_demand_start is None:
@@ -51,10 +51,10 @@ def evaluate_preset_and_stagger(
 
 
 def test_preset_mode_consigne():
-    """Vérifie que les modes presets appliquent les consignes respectives sans écraser la base."""
+    """Verify preset modes apply their respective target temperatures without overwriting base setting."""
     now = datetime.now(UTC)
 
-    # 1. Mode Comfort (base 19.0°C)
+    # 1. Comfort mode (base 19.0°C)
     target, should_heat, _, _ = evaluate_preset_and_stagger(
         cur_temp=18.0,
         comfort_temp=19.0,
@@ -70,7 +70,7 @@ def test_preset_mode_consigne():
     assert target == 19.0
     assert should_heat
 
-    # 2. Bascule en Mode Eco (17.0°C) -> Avec 18.0°C réels, la chauffe n'est plus nécessaire
+    # 2. Switch to Eco mode (17.0°C) -> With current 18.0°C, heating is no longer needed
     target_eco, should_heat_eco, _, _ = evaluate_preset_and_stagger(
         cur_temp=18.0,
         comfort_temp=19.0,
@@ -86,7 +86,7 @@ def test_preset_mode_consigne():
     assert target_eco == 17.0
     assert not should_heat_eco
 
-    # 3. Bascule en Mode Away (15.0°C)
+    # 3. Switch to Away mode (15.0°C)
     target_away, should_heat_away, _, _ = evaluate_preset_and_stagger(
         cur_temp=18.0,
         comfort_temp=19.0,
@@ -104,10 +104,10 @@ def test_preset_mode_consigne():
 
 
 def test_stagger_delay_delays_startup():
-    """Vérifie que le compresseur temporise son démarrage pendant la durée configurée."""
+    """Verify compressor delays activation for the configured stagger duration."""
     t0 = datetime.now(UTC)
 
-    # À t=0, la demande apparaît, mais le déphasage est de 300s (5 min)
+    # At t=0, demand appears, but stagger delay is 300s (5 min)
     target, should_heat, reason, demand_start = evaluate_preset_and_stagger(
         cur_temp=18.0,
         comfort_temp=19.0,
@@ -124,7 +124,7 @@ def test_stagger_delay_delays_startup():
     assert "Staggered startup delay" in reason
     assert demand_start == t0
 
-    # À t=150s (2 min 30), toujours en temporisation
+    # At t=150s (2 min 30s), still waiting in delay window
     t1 = t0 + timedelta(seconds=150)
     _, should_heat_t1, reason_t1, _ = evaluate_preset_and_stagger(
         cur_temp=18.0,
@@ -141,7 +141,7 @@ def test_stagger_delay_delays_startup():
     assert not should_heat_t1
     assert "150s remaining" in reason_t1
 
-    # À t=301s (> 5 min), le déphasage est écoulé, le compresseur est autorisé à démarrer
+    # At t=301s (> 5 min), stagger delay has elapsed; compressor is allowed to turn on
     t2 = t0 + timedelta(seconds=301)
     _, should_heat_t2, reason_t2, _ = evaluate_preset_and_stagger(
         cur_temp=18.0,

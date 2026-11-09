@@ -1,17 +1,18 @@
-"""Plateforme Climate pour l'intégration PWM Floor Heating Thermostat.
+"""Climate platform for the PWM Floor Heating Thermostat integration.
 
-Thermostat prédictif basé sur le modèle physique du bâtiment et de la dalle :
-- Estimation du quota énergétique journalier à partir des déperditions (W/K) et de la météo.
-- Ordonnancement prioritaire des cycles longs en Heures Creuses nocturnes (Linky TIC / Off-Peak tariff).
-- Machine à états finis inviolable garantissant les sécurités compresseurs Danfoss (30m ON / 15m OFF).
-- Moteur prédictif à temps mort : calcul de pente filtrée dT/dt (°C/h) et projection à t + theta.
-- Support des sondes de boucle d'eau / dalle (planchers hydrauliques) avec garde-fou DTU 65.14.
-- Mode simulation / Shadow Mode (dry_run: true) pour validation comparée sans pilotage physique.
+Thermodynamic model-based predictive thermostat for heavy underfloor heating:
+- Daily thermal energy budget estimation from building heat loss (W/K) and outdoor forecast.
+- Priority scheduling for continuous long heating cycles during Off-Peak tariff windows (Linky TIC / Off-Peak).
+- Strict Finite State Machine (FSM) enforcing Danfoss compressor safeties (30m min ON / 15m min OFF).
+- Dead-time predictive engine: continuous-discrete state observer (Kalman 1D / alpha-beta) and projection at t + theta.
+- Hydronic underfloor loop / slab sensor support with DTU 65.14 barefoot comfort and freeze protection limits.
+- Simulation / Shadow Mode (dry_run: true) for benchmark validation without hardware relay switching.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -143,7 +144,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 
 def _parse_timedelta(val: Any, default: timedelta) -> timedelta:
-    """Convertit une durée (chaîne, secondes, timedelta) en timedelta."""
+    """Convert input duration (string, seconds, timedelta) to timedelta."""
     if val is None:
         return default
     if isinstance(val, timedelta):
@@ -167,7 +168,7 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
-    """Configuration de la plateforme PWM Floor Heating Thermostat (via YAML)."""
+    """Set up the PWM Floor Heating Thermostat platform (via YAML)."""
     async_add_entities([PwmFloorHeatingThermostat(hass, config)])
 
 
@@ -176,7 +177,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Configuration de la plateforme PWM Floor Heating Thermostat (via UI Config Entry)."""
+    """Set up the PWM Floor Heating Thermostat platform (via UI Config Entry)."""
     config = {**entry.data, **entry.options}
     config[CONF_UNIQUE_ID] = entry.entry_id
     if CONF_NAME not in config:
@@ -187,7 +188,7 @@ async def async_setup_entry(
 
 
 class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
-    """Représentation du thermostat prédictif à dalle thermique."""
+    """Predictive thermodynamic underfloor heating thermostat entity."""
 
     _attr_precision = PRECISION_TENTHS
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -196,7 +197,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     _attr_preset_modes = [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
 
     def __init__(self, hass: HomeAssistant, config: ConfigType, entry: ConfigEntry | None = None) -> None:
-        """Initialisation de l'entité."""
+        """Initialize the thermostat entity."""
         self.hass = hass
         self._entry = entry
         self._name = config.get(CONF_NAME, DEFAULT_NAME)
@@ -208,29 +209,29 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._dry_run = bool(config.get(CONF_DRY_RUN, DEFAULT_DRY_RUN))
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
 
-        # Sonde de dalle / boucle d'eau (hydraulique)
+        # Floor slab / hydronic loop sensor
         self._floor_temp_sensor = config.get(CONF_FLOOR_TEMP_SENSOR)
         self._max_floor_temp = float(config.get(CONF_MAX_FLOOR_TEMP, DEFAULT_MAX_FLOOR_TEMP))
         self._min_floor_temp = float(config.get(CONF_MIN_FLOOR_TEMP, DEFAULT_MIN_FLOOR_TEMP))
         self._floor_temp: float | None = None
 
-        # Paramètres thermodynamiques
+        # Thermodynamic model parameters
         self._heat_loss = float(config.get(CONF_HEAT_LOSS, DEFAULT_HEAT_LOSS))
         self._power_watts = float(config.get(CONF_POWER_WATTS, DEFAULT_POWER_WATTS))
         self._slab_tau = float(config.get(CONF_SLAB_TIME_CONSTANT, DEFAULT_SLAB_TAU_HOURS))
         self._dead_time = float(config.get(CONF_DEAD_TIME, DEFAULT_DEAD_TIME_HOURS))
 
-        # Sécurités Danfoss
+        # Danfoss compressor safeties
         self._min_cycle_duration = _parse_timedelta(config.get(CONF_MIN_CYCLE_DURATION), DEFAULT_MIN_CYCLE)
         self._min_off_duration = _parse_timedelta(config.get(CONF_MIN_OFF_CYCLE_DURATION), DEFAULT_MIN_OFF)
         self._max_cycles = int(config.get(CONF_MAX_CYCLES_PER_DAY, DEFAULT_MAX_CYCLES))
 
-        # Plafonnement du budget thermique journalier (Anti-Gaspillage Heures Pleines)
+        # Daily thermal energy quota cap (Peak-hours anti-waste)
         self._enforce_daily_quota = bool(config.get(CONF_ENFORCE_DAILY_QUOTA, DEFAULT_ENFORCE_DAILY_QUOTA))
         self._enforce_daily_quota_sensor = config.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)
         self._quota_blocked = False
 
-        # Détection d'aération / Fenêtre ouverte
+        # Open window / ventilation detection
         self._window_detection_enabled = bool(config.get(CONF_WINDOW_DETECTION, DEFAULT_WINDOW_DETECTION))
         self._window_detection_sensor = config.get(CONF_WINDOW_DETECTION_SENSOR)
         self._window_sensor = config.get(CONF_WINDOW_SENSOR)
@@ -239,28 +240,28 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._window_open = False
         self._window_open_time: datetime | None = None
 
-        # Auto-calibrage continu de la déperdition H (Mode A passif)
+        # Continuous passive calibration of heat loss H (Mode A)
         self._heat_loss_measured_wk: float | None = None
         self._heat_loss_samples_count: int = 0
 
-        # Presets de température
+        # Temperature presets
         self._eco_temp = float(config.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP))
         self._away_temp = float(config.get(CONF_AWAY_TEMP, DEFAULT_AWAY_TEMP))
         self._comfort_temp = float(config.get(CONF_COMFORT_TEMP, DEFAULT_TARGET_TEMP))
         self._preset_mode: str = PRESET_COMFORT
 
-        # Coordination Multi-Zones & Déphasage Anti-Pic de démarrage
+        # Multi-Zone coordination & inrush staggering
         self._stagger_delay = _parse_timedelta(config.get(CONF_STAGGER_DELAY), DEFAULT_STAGGER_DELAY)
         self._demand_start_time: datetime | None = None
 
-        # État courant
+        # Live state
         self._cur_temp: float | None = None
         self._outdoor_temp: float | None = None
         self._target_temp: float = DEFAULT_TARGET_TEMP
         self._hvac_mode = HVACMode.HEAT
         self._hvac_action = HVACAction.IDLE
 
-        # Machine à états finis (FSM)
+        # Finite State Machine (FSM)
         self._fsm_state = FSM_IDLE
         self._last_state_change = dt_util.utcnow()
         self._cycle_start_time: datetime | None = None
@@ -268,24 +269,28 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._hours_run_today = 0.0
         self._last_day_reset = dt_util.now().date()
 
-        # Moteur prédictif et historique de dérivée
+        # Predictive engine & continuous-discrete state observer (Kalman 1D alpha-beta)
         self._temp_history: list[tuple[datetime, float]] = []
+        self._filtered_temp: float | None = None
         self._temp_derivative: float = 0.0
-        self._temp_projected: float = DEFAULT_TARGET_TEMP
+        self._temp_projected: float | None = None
+        self._observer_last_update: datetime | None = None
         self._projection_history: list[tuple[datetime, float]] = []
         self._model_error: float | None = None
+        self._was_window_open: bool = False
+        self._window_recovery_until: datetime | None = None
 
-        # Télémétrie et simulation
+        # Telemetry & simulation
         self._simulated_heater_state = False
         self._decision_reason = "Model initializing"
         self._energy_needed_kwh = 0.0
         self._hours_needed_24h = 0.0
 
     async def async_added_to_hass(self) -> None:
-        """Enregistrement des écouteurs d'événements et restauration d'état."""
+        """Register event listeners and restore previous state."""
         await super().async_added_to_hass()
 
-        # Restauration de l'état précédent
+        # Restore previous state
         if old_state := await self.async_get_last_state():
             if old_target := old_state.attributes.get(ATTR_TEMPERATURE):
                 try:
@@ -299,9 +304,15 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._fsm_state = old_attrs.get("fsm_state", FSM_IDLE)
             self._cycles_today = old_attrs.get("compressor_cycles_today", 0)
             self._hours_run_today = old_attrs.get("heating_hours_done_today", 0.0)
-            if "temp_derivative_hourly" in old_attrs:
+            if "temp_derivative_hourly" in old_attrs and old_attrs["temp_derivative_hourly"] is not None:
                 try:
                     self._temp_derivative = float(old_attrs["temp_derivative_hourly"])
+                except (ValueError, TypeError):
+                    pass
+            if "temp_projected_ahead" in old_attrs and old_attrs["temp_projected_ahead"] is not None:
+                try:
+                    self._temp_projected = float(old_attrs["temp_projected_ahead"])
+                    self._filtered_temp = self._temp_projected
                 except (ValueError, TypeError):
                     pass
             if "heat_loss_measured_wk" in old_attrs and old_attrs["heat_loss_measured_wk"] is not None:
@@ -323,7 +334,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 except (ValueError, TypeError):
                     pass
 
-        # Écouteurs de changement d'état
+        # Track state changes
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass, [self._target_sensor], self._async_target_sensor_changed
@@ -376,7 +387,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
-        # Boucle d'évaluation périodique (toutes les minutes)
+        # Periodic control loop (every minute)
         self.async_on_remove(
             async_track_time_interval(
                 self.hass, self._async_control_heating, timedelta(minutes=1)
@@ -385,7 +396,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         @callback
         def _async_startup(*_) -> None:
-            """Synchronisation initiale une fois Home Assistant complètement démarré."""
+            """Initial sensor synchronization once Home Assistant is fully started."""
             self._async_read_sensors()
             self.hass.async_create_task(self._async_control_heating())
 
@@ -396,56 +407,56 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @property
     def unique_id(self) -> str | None:
-        """Identifiant unique de l'entité."""
+        """Return unique ID of the entity."""
         return self._unique_id
 
     @property
     def device_info(self) -> DeviceInfo | None:
-        """Informations sur l'appareil pour Home Assistant."""
+        """Return device registry info for Home Assistant."""
         if self._unique_id:
             return DeviceInfo(
                 identifiers={(DOMAIN, self._unique_id)},
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.2",
+                sw_version="0.2.3",
             )
         return None
 
     @property
     def name(self) -> str:
-        """Nom de l'entité."""
+        """Return name of the entity."""
         return self._name
 
     @callback
     def async_write_ha_state(self) -> None:
-        """Écrit l'état et notifie les capteurs compagnons via dispatcher."""
+        """Write state and dispatch update signal to companion sensors."""
         super().async_write_ha_state()
         if self._entry and hasattr(self, "hass") and self.hass:
             async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
 
     @property
     def current_temperature(self) -> float | None:
-        """Température ambiante mesurée."""
+        """Return measured room ambient temperature."""
         return self._cur_temp
 
     @property
     def target_temperature(self) -> float | None:
-        """Consigne de température."""
+        """Return target temperature."""
         return self._target_temp
 
     @property
     def preset_mode(self) -> str | None:
-        """Mode preset actif."""
+        """Return active preset mode."""
         return self._preset_mode
 
     @property
     def preset_modes(self) -> list[str]:
-        """Modes presets disponibles."""
+        """Return available preset modes."""
         return [PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Bascule du mode preset (Comfort, Eco, Away)."""
+        """Switch active preset mode (Comfort, Eco, Away)."""
         if preset_mode == self._preset_mode:
             return
 
@@ -461,7 +472,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._target_temp = self._comfort_temp
             self._preset_mode = PRESET_COMFORT
         else:
-            _LOGGER.warning("Preset mode non reconnu : %s", preset_mode)
+            _LOGGER.warning("Unrecognized preset mode: %s", preset_mode)
             return
 
         await self._async_control_heating()
@@ -469,17 +480,17 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Mode de fonctionnement actuel."""
+        """Return current HVAC mode."""
         return self._hvac_mode
 
     @property
     def hvac_action(self) -> HVACAction:
-        """Action thermodynamique en cours."""
+        """Return current thermodynamic action."""
         return self._hvac_action
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Attributs télémétriques pour diagnostic et calage IA."""
+        """Return telemetry and diagnostic state attributes."""
         now = dt_util.utcnow()
         elapsed = (now - self._last_state_change).total_seconds()
         min_on_rem = 0
@@ -520,7 +531,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "min_floor_temperature": self._min_floor_temp if self._floor_temp_sensor else None,
             "dead_time_hours": self._dead_time,
             "temp_derivative_hourly": round(self._temp_derivative, 3),
-            "temp_projected_ahead": round(self._temp_projected, 2),
+            "temp_projected_ahead": (
+                round(self._temp_projected, 2) if self._temp_projected is not None else None
+            ),
             "model_error": self._model_error,
             "heat_loss_factor_wk": self._heat_loss,
             "compressor_power_watts": self._power_watts,
@@ -546,7 +559,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         }
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Ajustement de la consigne de température."""
+        """Adjust target temperature setpoint."""
         if (temp := kwargs.get(ATTR_TEMPERATURE)) is not None:
             self._target_temp = float(temp)
             if self._preset_mode in [PRESET_COMFORT, PRESET_NONE]:
@@ -555,7 +568,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Changement du mode (Chauffage / Arrêt)."""
+        """Change HVAC mode (Heat / Off)."""
         self._hvac_mode = hvac_mode
         if hvac_mode == HVACMode.OFF:
             await self._async_stop_heating_safe()
@@ -565,20 +578,22 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_target_sensor_changed(self, event) -> None:
-        """Mise à jour de la sonde d'ambiance."""
+        """Handle ambient temperature sensor state change."""
         new_state = event.data.get("new_state")
         if new_state is None or new_state.state in ["unknown", "unavailable"]:
             return
         try:
             self._cur_temp = float(new_state.state)
-            self._update_trajectory_projection(dt_util.utcnow())
+            now_utc = dt_util.utcnow()
+            self._check_window_open_state(now_utc)
+            self._update_trajectory_projection(now_utc)
             self.async_write_ha_state()
         except ValueError:
             pass
 
     @callback
     def _async_outdoor_sensor_changed(self, event) -> None:
-        """Mise à jour de la sonde extérieure / météo anticipée."""
+        """Handle outdoor temperature / weather forecast sensor state change."""
         new_state = event.data.get("new_state")
         if new_state is None or new_state.state in ["unknown", "unavailable"]:
             return
@@ -590,12 +605,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_off_peak_sensor_changed(self, event) -> None:
-        """Mise à jour de l'état des Heures Creuses / Off-peak tariff."""
+        """Handle Off-Peak tariff sensor state change."""
         self.async_write_ha_state()
 
     @callback
     def _async_floor_temp_changed(self, event) -> None:
-        """Mise à jour de la sonde de dalle / boucle d'eau."""
+        """Handle floor slab / hydronic loop sensor state change."""
         new_state = event.data.get("new_state")
         if new_state is None or new_state.state in ["unknown", "unavailable"]:
             return
@@ -607,7 +622,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_observed_heater_changed(self, event) -> None:
-        """Écoute passive du vrai relais en mode Shadow / Digital Twin."""
+        """Passive listener for observed heater state in Shadow / Digital Twin Mode."""
         new_state = event.data.get("new_state")
         if new_state is not None:
             _LOGGER.debug(
@@ -618,11 +633,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_quota_sensor_changed(self, event) -> None:
-        """Réaction dynamique immédiate au basculement de l'interrupteur de plafonnement UI."""
+        """Immediate reaction to daily quota enforcement switch toggle."""
         new_state = event.data.get("new_state")
         if new_state is not None:
             _LOGGER.debug(
-                "Interrupteur de plafonnement de quota journalier %s basculé sur %s",
+                "Daily quota enforcement switch %s toggled to %s",
                 self._enforce_daily_quota_sensor,
                 new_state.state,
             )
@@ -630,11 +645,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_window_detection_sensor_changed(self, event) -> None:
-        """Réaction dynamique immédiate au basculement de l'interrupteur UI de détection de fenêtre."""
+        """Immediate reaction to window detection master switch toggle."""
         new_state = event.data.get("new_state")
         if new_state is not None:
             _LOGGER.debug(
-                "Interrupteur de détection de fenêtre %s basculé sur %s",
+                "Window detection switch %s toggled to %s",
                 self._window_detection_sensor,
                 new_state.state,
             )
@@ -645,70 +660,161 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_window_sensor_changed(self, event) -> None:
-        """Réaction immédiate à l'ouverture/fermeture d'un capteur physique de fenêtre."""
+        """Immediate reaction to physical contact window sensor state change."""
         new_state = event.data.get("new_state")
         if new_state is not None:
             self._window_open = new_state.state == "on"
             self._window_open_time = dt_util.utcnow() if self._window_open else None
             _LOGGER.info(
-                "Capteur physique de fenêtre %s : %s",
+                "Physical window sensor %s : %s",
                 self._window_sensor,
-                "OUVERTE" if self._window_open else "FERMÉE",
+                "OPEN" if self._window_open else "CLOSED",
             )
             self.hass.async_create_task(self._async_control_heating())
 
     @property
     def _total_heating_hours_today(self) -> float:
-        """Heures totales de chauffe cumulées aujourd'hui (incluant le cycle actif)."""
+        """Total cumulative heating run hours today (including active cycle)."""
         total = self._hours_run_today
         if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL] and self._cycle_start_time:
             total += (dt_util.utcnow() - self._cycle_start_time).total_seconds() / 3600.0
         return total
 
+    def _check_window_open_state(self, now_utc: datetime) -> None:
+        """Evaluate open window / ventilation detection state."""
+        window_detection_active = self._window_detection_enabled
+        if self._window_detection_sensor:
+            st_w = self.hass.states.get(self._window_detection_sensor)
+            if st_w and st_w.state not in ["unknown", "unavailable"]:
+                window_detection_active = st_w.state == "on"
+
+        if not window_detection_active:
+            self._window_open = False
+            self._window_open_time = None
+            return
+
+        if self._window_sensor:
+            st_ws = self.hass.states.get(self._window_sensor)
+            if st_ws and st_ws.state not in ["unknown", "unavailable"]:
+                self._window_open = st_ws.state == "on"
+                if self._window_open and self._window_open_time is None:
+                    self._window_open_time = now_utc
+                elif not self._window_open:
+                    self._window_open_time = None
+        else:
+            # Automatic thermal drop detection
+            if self._window_open:
+                if self._window_open_time and (now_utc - self._window_open_time) >= self._window_timeout:
+                    _LOGGER.info(
+                        "Window open timeout reached (%s). Resuming heating operation.",
+                        self._window_timeout,
+                    )
+                    self._window_open = False
+                    self._window_open_time = None
+                elif self._temp_derivative > 0.2:
+                    _LOGGER.info(
+                        "Window closed: temperature recovery observed (+%.2f°C/h). Resuming operation.",
+                        self._temp_derivative,
+                    )
+                    self._window_open = False
+                    self._window_open_time = None
+            else:
+                cutoff_15m = now_utc - timedelta(minutes=15)
+                recent_temps = [v for t, v in self._temp_history if t >= cutoff_15m]
+                if recent_temps and self._cur_temp is not None:
+                    max_recent = max(recent_temps)
+                    drop = max_recent - self._cur_temp
+                    if drop >= self._window_drop_threshold or (self._temp_derivative <= -1.5 and drop >= 0.2):
+                        self._window_open = True
+                        self._window_open_time = now_utc
+                        _LOGGER.warning(
+                            "Rapid thermal drop detected (drop %.2f°C in <= 15 min, slope %.2f°C/h). Suspending heating.",
+                            drop,
+                            self._temp_derivative,
+                        )
+
     def _update_trajectory_projection(self, now: datetime) -> None:
-        """Calcule la pente filtrée dT/dt (°C/h) et projette la température à t + theta."""
+        """Estimate filtered state and project slab trajectory at t + theta using continuous-discrete alpha-beta observer."""
         if self._cur_temp is None:
             return
 
+        # Maintain 15-minute history window for rapid thermal drop / ventilation detection
         self._temp_history.append((now, self._cur_temp))
+        cutoff_15m = now - timedelta(minutes=15)
+        self._temp_history = [(t, v) for t, v in self._temp_history if t >= cutoff_15m]
 
-        # Élagage de la fenêtre glissante (60 minutes)
-        cutoff = now - timedelta(minutes=60)
-        self._temp_history = [(t, v) for t, v in self._temp_history if t >= cutoff]
+        # Detect window closure transition to initiate thermal rebound damping
+        if self._was_window_open and not self._window_open:
+            self._window_recovery_until = now + timedelta(minutes=30)
+            # Reset derivative on window closure: air warming back against slab is not slab overheating
+            self._temp_derivative = 0.0
+        self._was_window_open = self._window_open
 
-        # Régression linéaire sur la fenêtre si au moins 2 points espacés de 5 minutes
-        if len(self._temp_history) >= 2:
-            dt_span = (self._temp_history[-1][0] - self._temp_history[0][0]).total_seconds()
-            if dt_span >= 300:  # >= 5 minutes
-                t0 = self._temp_history[0][0]
-                t_hours = [(t - t0).total_seconds() / 3600.0 for t, _ in self._temp_history]
-                temps = [v for _, v in self._temp_history]
+        # Clean filter initialization on first reading (prevents startup spike to 19°C)
+        if self._filtered_temp is None or self._observer_last_update is None:
+            self._filtered_temp = self._cur_temp
+            self._temp_derivative = 0.0
+            self._observer_last_update = now
+            self._temp_projected = self._cur_temp
+            self._projection_history.append((now, self._temp_projected))
+            return
 
-                n = len(t_hours)
-                mean_t = sum(t_hours) / n
-                mean_temp = sum(temps) / n
+        dt = (now - self._observer_last_update).total_seconds() / 3600.0  # in hours
 
-                denom = sum((t - mean_t) ** 2 for t in t_hours)
-                if denom > 1e-6:
-                    raw_slope = (
-                        sum((t - mean_t) * (v - mean_temp) for t, v in zip(t_hours, temps, strict=True)) / denom
-                    )
-                    # Borne physique de pente [-3.0, +3.0] °C/h
-                    self._temp_derivative = max(-3.0, min(3.0, raw_slope))
-                else:
-                    self._temp_derivative = 0.0
+        if dt > 0:
+            if dt > 2.0:
+                # Large time gap (e.g. extended HA shutdown) -> realign state immediately
+                self._filtered_temp = self._cur_temp
+                self._temp_derivative = 0.0
+            else:
+                # 1. State prediction
+                t_pred = self._filtered_temp + (dt * self._temp_derivative)
+                v_pred = self._temp_derivative
 
-        # Trajectoire projetée à t + theta
-        self._temp_projected = self._cur_temp + (self._dead_time * self._temp_derivative)
+                # 2. Innovation (residual)
+                innov = self._cur_temp - t_pred
 
-        # Mémorisation de la projection pour le calcul de l'erreur de modèle e_model
+                # 3. Optimal alpha-beta gains via Kalata tracking relationship
+                # Measurement quantization noise variance for 0.1°C resolution: R = 0.1^2 / 12 ~= 0.000833
+                # Process noise parameter (slab thermal acceleration bound): q = 1.0 (°C/h)^2/h
+                var_r = 0.0008333
+                q_proc = 1.0
+                lambda_k = (q_proc * (dt ** 2)) / math.sqrt(var_r)
+                r_k = (4.0 + lambda_k - math.sqrt(max(0.0, 8.0 * lambda_k + (lambda_k ** 2)))) / 4.0
+                alpha = max(0.01, min(0.9, 1.0 - (r_k ** 2)))
+                beta = max(0.0001, min(0.8, 2.0 * (2.0 - alpha) - 4.0 * math.sqrt(max(0.0, 1.0 - alpha))))
+
+                # 4. State correction
+                self._filtered_temp = t_pred + (alpha * innov)
+                self._temp_derivative = v_pred + ((beta / dt) * innov)
+
+                # Physical bounds on derivative [-2.5, +2.5] °C/h
+                self._temp_derivative = max(-2.5, min(2.5, self._temp_derivative))
+
+            self._observer_last_update = now
+
+        # Ventilation freeze & post-airing rebound damping
+        in_recovery = self._window_recovery_until is not None and now < self._window_recovery_until
+        if self._window_open:
+            # Active window opening: slab has not lost heat like room air, freeze derivative
+            effective_deriv = 0.0
+        elif in_recovery:
+            # Post-airing rebound: cold air warms back against warm surfaces, clamp positive derivative
+            effective_deriv = min(0.05, max(-0.5, self._temp_derivative))
+        else:
+            effective_deriv = self._temp_derivative
+
+        # Projected trajectory at t + theta (computed from filtered temperature)
+        self._temp_projected = self._filtered_temp + (self._dead_time * effective_deriv)
+
+        # Record projection for continuous model error evaluation
         self._projection_history.append((now, self._temp_projected))
 
-        # Élagage de l'historique des projections (conserve jusqu'à 2 * dead_time + 1h)
+        # Prune projection history (retain up to 2 * dead_time + 1h)
         cutoff_proj = now - timedelta(hours=max(4.0, (self._dead_time * 2.0) + 1.0))
         self._projection_history = [(t, v) for t, v in self._projection_history if t >= cutoff_proj]
 
-        # Calcul de model_error : e_model(t) = T_measured(t) - T_projected(t - theta)
+        # Evaluate model error: e_model(t) = T_measured(t) - T_projected(t - theta)
         target_time = now - timedelta(hours=self._dead_time)
         past_proj: float | None = None
         for i in range(len(self._projection_history) - 1):
@@ -727,12 +833,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._model_error = round(self._cur_temp - past_proj, 2)
 
     def _async_read_sensors(self) -> None:
-        """Lecture synchronisée des états actuels."""
+        """Synchronize states from configured sensors."""
         st_in = self.hass.states.get(self._target_sensor)
         if st_in and st_in.state not in ["unknown", "unavailable"]:
             try:
                 self._cur_temp = float(st_in.state)
-                self._update_trajectory_projection(dt_util.utcnow())
+                now_utc = dt_util.utcnow()
+                self._check_window_open_state(now_utc)
+                self._update_trajectory_projection(now_utc)
             except ValueError:
                 pass
 
@@ -752,20 +860,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     pass
 
     async def _async_control_heating(self, now: datetime | None = None) -> None:
-        """Cœur algorithmique : Bilan thermodynamique et commande par modèle."""
+        """Main algorithmic loop: thermodynamic energy balance and model-based scheduling."""
         if self._hvac_mode == HVACMode.OFF:
             return
 
         now_utc = dt_util.utcnow()
 
-        # Reset journalier des compteurs à minuit local
+        # Midnight daily counter reset
         today = dt_util.now().date()
         if today != self._last_day_reset:
             self._hours_run_today = 0.0
             self._cycles_today = 0
             self._last_day_reset = today
 
-        # Mise à jour des durées de fonctionnement en cours
+        # Update FSM state transitions based on elapsed lock durations
         elapsed = (now_utc - self._last_state_change).total_seconds()
         if self._fsm_state == FSM_RUNNING_MIN_LOCK and elapsed >= self._min_cycle_duration.total_seconds():
             self._fsm_state = FSM_RUNNING_NORMAL
@@ -773,112 +881,65 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._fsm_state == FSM_WAITING_MIN_OFF and elapsed >= self._min_off_duration.total_seconds():
             self._fsm_state = FSM_IDLE
 
-        # 1. Mise à jour de la projection de trajectoire
+        # 1. Evaluate ventilation / window open state
+        self._check_window_open_state(now_utc)
+
+        # 2. Update state observer and slab trajectory projection
         self._update_trajectory_projection(now_utc)
 
-        # Détection d'aération / Fenêtre ouverte
-        window_detection_active = self._window_detection_enabled
-        if self._window_detection_sensor:
-            st_w = self.hass.states.get(self._window_detection_sensor)
-            if st_w and st_w.state not in ["unknown", "unavailable"]:
-                window_detection_active = st_w.state == "on"
-
-        if window_detection_active:
-            if self._window_sensor:
-                st_ws = self.hass.states.get(self._window_sensor)
-                if st_ws and st_ws.state not in ["unknown", "unavailable"]:
-                    self._window_open = st_ws.state == "on"
-                    if self._window_open and self._window_open_time is None:
-                        self._window_open_time = now_utc
-                    elif not self._window_open:
-                        self._window_open_time = None
-            else:
-                # Détection automatique de chute rapide de température
-                if self._window_open:
-                    if self._window_open_time and (now_utc - self._window_open_time) >= self._window_timeout:
-                        _LOGGER.info(
-                            "Fenêtre ouverte : délai d'aération maximal atteint (%s). Reprise automatique.",
-                            self._window_timeout,
-                        )
-                        self._window_open = False
-                        self._window_open_time = None
-                    elif self._temp_derivative > 0.2:
-                        _LOGGER.info(
-                            "Fenêtre refermée : remontée de température observée (+%.2f°C/h). Reprise.",
-                            self._temp_derivative,
-                        )
-                        self._window_open = False
-                        self._window_open_time = None
-                else:
-                    cutoff_15m = now_utc - timedelta(minutes=15)
-                    recent_temps = [v for t, v in self._temp_history if t >= cutoff_15m]
-                    if recent_temps and self._cur_temp is not None:
-                        max_recent = max(recent_temps)
-                        drop = max_recent - self._cur_temp
-                        if drop >= self._window_drop_threshold or (self._temp_derivative <= -1.5 and drop >= 0.2):
-                            self._window_open = True
-                            self._window_open_time = now_utc
-                            _LOGGER.warning(
-                                "Aération détectée (chute de %.2f°C en <= 15 min, pente %.2f°C/h). Suspension de la chauffe.",
-                                drop,
-                                self._temp_derivative,
-                            )
-        else:
-            self._window_open = False
-            self._window_open_time = None
-
-        # 2. Calcul du Quota d'Énergie Thermique requis (kWh sur 24h)
+        # 3. Calculate 24h thermal energy quota (kWh)
         if self._outdoor_temp is not None:
             delta_t = max(0.0, self._target_temp - self._outdoor_temp)
-            # Déperditions journalières en kWh = (H * delta_t * 24h) / 1000
+            # Daily thermal heat loss in kWh = (H * delta_t * 24h) / 1000
             self._energy_needed_kwh = (self._heat_loss * delta_t * 24.0) / 1000.0
-            # Heures de fonctionnement compresseur nécessaires sur 24h
+            # Required compressor operating hours over 24h
             self._hours_needed_24h = (self._energy_needed_kwh * 1000.0) / self._power_watts
 
-        # 3. Heures Creuses / Off-peak actives ?
+        # 4. Check Off-Peak tariff active state
         off_peak_active = False
         if self._off_peak_sensor:
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
-        # 4. Stratégie d'ordonnancement prédictif par modèle
+        # 5. Model-based predictive scheduling strategy
         should_heat = False
 
         if self._cur_temp is not None and self._outdoor_temp is not None:
             error = self._target_temp - self._cur_temp
-            projected_error = self._target_temp - self._temp_projected
+            proj_val = self._temp_projected if self._temp_projected is not None else self._cur_temp
+            projected_error = self._target_temp - proj_val
 
-            # Règle A : Priorité absolue à la charge nocturne en Heures Creuses / Off-Peak
+            # Rule A: Priority thermal precharge during Off-Peak hours
             if off_peak_active:
                 if error >= -0.5 and self._outdoor_temp <= 12.0:
                     should_heat = True
                     self._decision_reason = (
                         f"Off-peak thermal precharge (ext: {self._outdoor_temp}°C, "
-                        f"curr: {self._cur_temp}°C, proj: {round(self._temp_projected, 2)}°C in {self._dead_time}h)"
+                        f"curr: {self._cur_temp}°C, proj: {round(proj_val, 2)}°C in {self._dead_time}h)"
                     )
-            # Règle B : En Heures Pleines / Peak, allumage anticipé si la trajectoire décroche
+            # Rule B: Peak hours heating only on anticipated trajectory drop
             else:
                 if projected_error > 0.15 or error > 0.2:
                     should_heat = True
                     self._decision_reason = (
-                        f"Anticipated thermal drop: projected {round(self._temp_projected, 2)}°C in {self._dead_time}h "
+                        f"Anticipated thermal drop: projected {round(proj_val, 2)}°C in {self._dead_time}h "
                         f"(slope: {round(self._temp_derivative, 3)}°C/h, below target {self._target_temp}°C)"
                     )
 
-            # Règle C : Garde-fou de surface et ambiance (+0.6°C réel ou projection > consigne + 0.8°C)
+            # Rule C: Surface and ambient overshoot protection (+0.6°C real or projected > target + 0.8°C)
             if error < -0.6 or (projected_error < -0.8 and self._cur_temp >= self._target_temp):
                 should_heat = False
                 self._decision_reason = (
                     f"Overshoot prevention cutoff: curr {self._cur_temp}°C, "
-                    f"projected {round(self._temp_projected, 2)}°C (target: {self._target_temp}°C)"
+                    f"projected {round(proj_val, 2)}°C (target: {self._target_temp}°C)"
                 )
             elif not should_heat:
                 self._decision_reason = (
                     f"Idle (stable trajectory: curr {self._cur_temp}°C, "
-                    f"projected {round(self._temp_projected, 2)}°C in {self._dead_time}h)"
+                    f"projected {round(proj_val, 2)}°C in {self._dead_time}h)"
                 )
 
-            # Règle D : Plafonnement du Quota Journalier en Heures Pleines (Anti-Gaspillage)
+            # Rule D: Daily thermal quota enforcement during Peak hours
             quota_enforcement_active = self._enforce_daily_quota
             if self._enforce_daily_quota_sensor:
                 st_q = self.hass.states.get(self._enforce_daily_quota_sensor)
@@ -898,12 +959,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                         f"Peak-hour cycle inhibited by quota enforcement (switch ON)."
                     )
 
-            # Règle E : Détection de fenêtre ouverte / aération
+            # Rule E: Open window / ventilation detection
             if self._window_open:
                 should_heat = False
                 self._decision_reason = "Open window / ventilation detected. Heating suspended."
 
-        # Règle F : Déphasage anti-pic de démarrage multi-zones
+        # Rule F: Multi-Zone startup staggering
         stagger_remaining_sec = 0
         if should_heat and self._fsm_state == FSM_IDLE and self._stagger_delay.total_seconds() > 0:
             if self._demand_start_time is None:
@@ -918,7 +979,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         elif not should_heat:
             self._demand_start_time = None
 
-        # 5. Garde-fous plancher chauffant / boucle d'eau (si capteur configuré)
+        # 6. Hydronic floor loop safeties (if sensor configured)
         if self._floor_temp is not None:
             if self._floor_temp >= self._max_floor_temp:
                 should_heat = False
@@ -933,13 +994,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"below floor minimum {self._min_floor_temp}°C"
                 )
 
-        # 6. Exécution sous contrainte stricte de la FSM
+        # 7. Execute heating decision under strict FSM constraints
         if should_heat:
             await self._async_start_heating_safe()
         else:
             await self._async_stop_heating_safe()
 
-        # 7. Auto-étalonnage passif de la déperdition thermique (Mode A - Conseiller Télémétrique)
+        # 8. Passive continuous calibration of heat loss factor (Mode A)
         if (
             self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]
             and not self._window_open
@@ -947,16 +1008,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             and self._outdoor_temp is not None
         ):
             time_since_stop = (now_utc - self._last_state_change).total_seconds()
-            required_rest = 2.0 * self._dead_time * 3600.0  # Dalle relaxée (> 2 * theta)
+            required_rest = 2.0 * self._dead_time * 3600.0  # Relaxed slab (> 2 * theta)
             delta_t = self._cur_temp - self._outdoor_temp
 
             if time_since_stop >= required_rest and delta_t >= 3.0 and self._temp_derivative < -0.05:
-                # C_eff = slab_tau_hours * heat_loss_wk (en Wh/K)
+                # C_eff = slab_tau_hours * heat_loss_wk (in Wh/K)
                 c_eff = self._slab_tau * self._heat_loss
                 p_loss = -c_eff * self._temp_derivative  # Watts
                 sample_ua = p_loss / delta_t
 
-                # Filtrage des perturbations : sample dans [0.3 * H, 3.0 * H]
+                # Disturbance filter: sample within [0.3 * H, 3.0 * H]
                 if 0.3 * self._heat_loss <= sample_ua <= 3.0 * self._heat_loss:
                     if self._heat_loss_measured_wk is None:
                         self._heat_loss_measured_wk = round(sample_ua, 1)
@@ -969,7 +1030,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self.async_write_ha_state()
 
     async def _async_start_heating_safe(self) -> None:
-        """Démarre le compresseur si les conditions de repos minimal sont satisfaites."""
+        """Start compressor if minimum off-cycle safety conditions are satisfied."""
         now = dt_util.utcnow()
 
         if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
@@ -979,16 +1040,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             elapsed = (now - self._last_state_change).total_seconds()
             if elapsed < self._min_off_duration.total_seconds():
                 _LOGGER.debug(
-                    "Démarrage différé : repos de sécurité compresseur en cours (%ds restantes)",
+                    "Startup deferred: compressor minimum off safety in progress (%ds remaining)",
                     int(self._min_off_duration.total_seconds() - elapsed),
                 )
                 return
 
-        # Démarrage effectif ou simulé
+        # Start heating (physical or simulated)
         self._simulated_heater_state = True
         if self._dry_run:
             _LOGGER.info(
-                "[DRY-RUN / SHADOW MODE] Démarrage simulé compresseur %s (Raison: %s)",
+                "[DRY-RUN / SHADOW MODE] Simulated compressor start for %s (Reason: %s)",
                 self._name,
                 self._decision_reason,
             )
@@ -999,7 +1060,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         else:
             if self._heater_entity:
                 domain = self._heater_entity.split(".")[0]
-                _LOGGER.info("Démarrage physique compresseur : %s", self._heater_entity)
+                _LOGGER.info("Physical compressor start: %s", self._heater_entity)
                 await self.hass.services.async_call(
                     domain, "turn_on", {"entity_id": self._heater_entity}, blocking=True
                 )
@@ -1012,7 +1073,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._cycles_today += 1
 
     async def _async_stop_heating_safe(self) -> None:
-        """Arrête le compresseur si et seulement si la durée minimale de marche est respectée."""
+        """Stop compressor if and only if minimum runtime safety is satisfied."""
         now = dt_util.utcnow()
 
         if self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]:
@@ -1022,16 +1083,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             elapsed = (now - self._last_state_change).total_seconds()
             if elapsed < self._min_cycle_duration.total_seconds():
                 _LOGGER.debug(
-                    "Arrêt différé : marche minimale compresseur en cours (%ds restantes)",
+                    "Stop deferred: compressor minimum runtime safety in progress (%ds remaining)",
                     int(self._min_cycle_duration.total_seconds() - elapsed),
                 )
                 return
 
-        # Arrêt effectif ou simulé
+        # Stop heating (physical or simulated)
         self._simulated_heater_state = False
         if self._dry_run:
             _LOGGER.info(
-                "[DRY-RUN / SHADOW MODE] Arrêt simulé compresseur %s (Raison: %s)",
+                "[DRY-RUN / SHADOW MODE] Simulated compressor stop for %s (Reason: %s)",
                 self._name,
                 self._decision_reason,
             )
@@ -1042,7 +1103,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         else:
             if self._heater_entity:
                 domain = self._heater_entity.split(".")[0]
-                _LOGGER.info("Arrêt physique compresseur : %s", self._heater_entity)
+                _LOGGER.info("Physical compressor stop: %s", self._heater_entity)
                 await self.hass.services.async_call(
                     domain, "turn_off", {"entity_id": self._heater_entity}, blocking=True
                 )

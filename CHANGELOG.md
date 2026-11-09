@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.3] - 2026-11-09
+
+### Added
+- **Continuous-Discrete $\alpha$-$\beta$ State Observer (Kalata Optimal Kalman 1D)**:
+  - Replaced rolling linear regression with a state observer ($T$, $\dot{T}$) modeling Zigbee sensor quantization noise ($R = \Delta^2 / 12$) and building slab acceleration limits ($q$).
+  - Dynamically computes optimal $\alpha$ and $\beta$ gains using the Kalata formulation across variable event-driven update intervals $\Delta t$.
+  - Completely eliminates high-frequency derivative noise and sawtooth oscillations in projected slab temperature ($T_{\text{projected}}$).
+- **Ventilation & Post-Airing Thermal Damping**:
+  - Automatically freezes slab projection derivative to $0.0\text{ °C/h}$ during active window opening / rapid room aeration, preventing false projection plunges.
+  - Implements a 30-minute post-airing recovery window with bounded positive derivative to prevent false overshoot spikes when cold air rewarms against warm building envelope surfaces.
+
+### Fixed
+- **Startup Projection Spike Fix**:
+  - Resolved startup artifact where `temp_projected_ahead` was initialized to hardcoded `19.0 °C` before first sensor reading, causing a vertical drop on Lovelace graphs.
+  - Initialized to `None` with direct alignment to measured room ambient temperature on the first received sample.
+
+### Changed
+- **Codebase Internationalization & English Standardization**:
+  - Standardized all Python module code, docstrings, internal comments, and unit test documentation across the entire integration repository to 100% English.
+
+---
+
 ## [0.2.2] - 2026-11-08
 
 ### Added

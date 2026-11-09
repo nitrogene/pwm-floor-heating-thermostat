@@ -1,4 +1,4 @@
-"""Tests pour le flux de configuration (Config Flow) et d'options (Options Flow)."""
+"""Tests for configuration flow (Config Flow) and options flow (Options Flow)."""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -40,7 +40,7 @@ from custom_components.pwm_floor_heating_thermostat.const import (
 
 
 def test_config_flow_shows_form():
-    """Vérifie que l'étape utilisateur sans saisie affiche le formulaire."""
+    """Verify that user step without input displays the configuration form."""
 
     async def _test():
         flow = PwmFloorHeatingConfigFlow()
@@ -54,18 +54,18 @@ def test_config_flow_shows_form():
 
 
 def test_config_flow_missing_sensors():
-    """Vérifie le rejet avec erreurs si les capteurs obligatoires sont absents."""
+    """Verify rejection with errors if required sensors are missing."""
 
     async def _test():
         flow = PwmFloorHeatingConfigFlow()
 
-        # Aucun capteur
+        # No sensors provided
         result = await flow.async_step_user(user_input={CONF_NAME: "Salon"})
         assert result["type"] == "form"
         assert result["errors"][CONF_TARGET_SENSOR] == "missing_target_sensor"
         assert result["errors"][CONF_OUTDOOR_SENSOR] == "missing_outdoor_sensor"
 
-        # Capteur extérieur manquant
+        # Outdoor sensor missing
         result2 = await flow.async_step_user(
             user_input={
                 CONF_NAME: "Salon",
@@ -80,7 +80,7 @@ def test_config_flow_missing_sensors():
 
 
 def test_config_flow_success():
-    """Vérifie la création réussie d'une entrée avec identifiant unique."""
+    """Verify successful entry creation with unique identifier."""
 
     async def _test():
         flow = PwmFloorHeatingConfigFlow()
@@ -107,7 +107,7 @@ def test_config_flow_success():
 
 
 def test_config_flow_abort_if_already_configured():
-    """Vérifie l'avortement si l'unique_id est déjà configuré."""
+    """Verify abort if unique_id is already configured."""
 
     async def _test():
         flow = PwmFloorHeatingConfigFlow()
@@ -127,7 +127,7 @@ def test_config_flow_abort_if_already_configured():
 
 
 def test_options_flow_shows_form():
-    """Vérifie l'affichage du formulaire d'options prérempli."""
+    """Verify prefilled options form display."""
 
     async def _test():
         entry = MockConfigEntry(
@@ -153,7 +153,7 @@ def test_options_flow_shows_form():
 
 
 def test_options_flow_update_settings():
-    """Vérifie la mise à jour des options (ex: passage de Shadow Mode à Réel)."""
+    """Verify options update (e.g. switching from Shadow Mode to live control)."""
 
     async def _test():
         entry = MockConfigEntry(
@@ -185,7 +185,7 @@ def test_options_flow_update_settings():
 
 
 def test_climate_async_setup_entry():
-    """Vérifie que climate.async_setup_entry instancie l'entité avec options fusionnées."""
+    """Verify that climate.async_setup_entry instantiates entity with merged options."""
 
     async def _test():
         hass = MagicMock()
@@ -223,7 +223,7 @@ def test_climate_async_setup_entry():
 
 
 def test_init_setup_and_unload_entry():
-    """Vérifie que l'initialisation et le déchargement de l'entrée délèguent à Home Assistant."""
+    """Verify entry setup and unloading lifecycle in Home Assistant."""
 
     async def _test():
         hass = MagicMock()

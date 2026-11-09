@@ -1,4 +1,4 @@
-"""Tests pour le module de diagnostics."""
+"""Tests for diagnostics module."""
 
 import asyncio
 from unittest.mock import MagicMock
@@ -8,7 +8,7 @@ from custom_components.pwm_floor_heating_thermostat.diagnostics import async_get
 
 
 def test_diagnostics_returns_sanitized_data():
-    """Vérifie que les données de diagnostic retournent la config et l'état en direct."""
+    """Verify diagnostics dump returns sanitized config and live state."""
     async def _test():
         hass = MagicMock()
         entry = MagicMock()

@@ -1,4 +1,4 @@
-"""Config flow pour l'intégration PWM Floor Heating Thermostat."""
+"""Config flow for PWM Floor Heating Thermostat integration."""
 
 from __future__ import annotations
 
@@ -51,14 +51,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Gestionnaire de flux de configuration pour PWM Floor Heating Thermostat."""
+    """Handle a config flow for PWM Floor Heating Thermostat."""
 
     VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Étape initiale d'ajout d'un thermostat."""
+        """Handle the initial user step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -152,21 +152,21 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
-        """Retourne le gestionnaire de réglages dynamiques (Options Flow)."""
+        """Get the options flow for this handler."""
         return PwmFloorHeatingOptionsFlowHandler(config_entry)
 
 
 class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
-    """Gestionnaire des options de réglage sans redémarrage (Options Flow)."""
+    """Handle options flow for PWM Floor Heating Thermostat."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:
-        """Initialisation compatible toutes versions de Home Assistant."""
+        """Initialize options flow compatible with all Home Assistant versions."""
         if config_entry is not None:
             self._config_entry = config_entry
 
     @property
     def config_entry(self) -> config_entries.ConfigEntry:
-        """Retourne l'entrée de configuration."""
+        """Return the configuration entry."""
         if hasattr(self, "_config_entry"):
             return self._config_entry
         return super().config_entry
@@ -174,7 +174,7 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Étape unique de réglage des options."""
+        """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 

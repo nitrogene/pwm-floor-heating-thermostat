@@ -1,4 +1,4 @@
-"""Support des capteurs de diagnostic pour PWM Floor Heating Thermostat."""
+"""Diagnostic sensor platform support for PWM Floor Heating Thermostat."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, kw_only=True)
 class PwmSensorEntityDescription(SensorEntityDescription):
-    """Description détaillée d'un capteur de diagnostic PWM."""
+    """Detailed description of a PWM diagnostic sensor."""
 
     value_fn: Callable[[Any], Any] = lambda x: None
 
@@ -115,10 +115,10 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Initialise les capteurs de diagnostic pour une entrée thermostat PWM."""
+    """Set up diagnostic sensors for a PWM thermostat entry."""
     thermostat = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if not thermostat:
-        # Attente brève de l'instanciation de la plateforme climate en cas de concurrence
+        # Brief retry loop awaiting climate platform instantiation in case of concurrency
         for _ in range(20):
             await asyncio.sleep(0.1)
             thermostat = hass.data.get(DOMAIN, {}).get(entry.entry_id)
@@ -126,7 +126,7 @@ async def async_setup_entry(
                 break
 
     if not thermostat:
-        _LOGGER.warning("Thermostat introuvable dans hass.data pour l'entrée %s", entry.entry_id)
+        _LOGGER.warning("Thermostat not found in hass.data for entry %s", entry.entry_id)
         return
 
     entities = [
@@ -137,7 +137,7 @@ async def async_setup_entry(
 
 
 class PwmDiagnosticSensor(SensorEntity):
-    """Capteur compagnon de diagnostic pour le thermostat PWM."""
+    """Diagnostic companion sensor for PWM thermostat."""
 
     _attr_has_entity_name = True
     entity_description: PwmSensorEntityDescription
@@ -148,7 +148,7 @@ class PwmDiagnosticSensor(SensorEntity):
         description: PwmSensorEntityDescription,
         entry: ConfigEntry,
     ) -> None:
-        """Initialise le capteur compagnon."""
+        """Initialize the companion sensor."""
         self._thermostat = thermostat
         self.entity_description = description
         self._entry = entry
@@ -157,22 +157,22 @@ class PwmDiagnosticSensor(SensorEntity):
 
     @property
     def native_value(self) -> Any:
-        """Valeur calculée depuis le thermostat maître."""
+        """Return native value computed from master thermostat."""
         return self.entity_description.value_fn(self._thermostat)
 
     @property
     def device_info(self) -> DeviceInfo | None:
-        """Rattachement au même appareil DeviceInfo que le thermostat."""
+        """Attach to the same device as the master thermostat."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title,
             manufacturer="Nitrogene",
             model="PWM Thermodynamic Underfloor Thermostat",
-            sw_version="0.2.2",
+            sw_version="0.2.3",
         )
 
     async def async_added_to_hass(self) -> None:
-        """Abonnement aux notifications de mise à jour du thermostat maître."""
+        """Subscribe to update notifications from the master thermostat."""
         await super().async_added_to_hass()
         self.async_on_remove(
             async_dispatcher_connect(
@@ -184,5 +184,5 @@ class PwmDiagnosticSensor(SensorEntity):
 
     @callback
     def _handle_thermostat_update(self) -> None:
-        """Met à jour l'état du capteur lors d'un changement du thermostat."""
+        """Update sensor state when master thermostat dispatches an update."""
         self.async_write_ha_state()

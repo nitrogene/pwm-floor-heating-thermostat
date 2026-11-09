@@ -1,4 +1,4 @@
-"""Configuration pytest pour pwm_floor_heating_thermostat."""
+"""pytest configuration and mocks for pwm_floor_heating_thermostat."""
 
 import sys
 from dataclasses import dataclass
@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-# Ajouter les chemins à sys.path
+# Add project paths to sys.path
 root_dir = Path(__file__).resolve().parent.parent
 for p in [root_dir, root_dir / "custom_components", root_dir / "custom_components" / "pwm_floor_heating_thermostat"]:
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-# Mock des modules Home Assistant si absents de l'environnement local (Python système)
+# Mock Home Assistant modules if not present in the local environment
 ha_modules = [
     "homeassistant",
     "homeassistant.core",
@@ -41,7 +41,7 @@ for mod in ha_modules:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
-# Lier les sous-modules aux modules parents pour que les imports de type 'from a.b import c' fonctionnent
+# Link sub-modules to parent modules so 'from a.b import c' works seamlessly
 for mod_name in ha_modules:
     parts = mod_name.split(".")
     for i in range(1, len(parts)):
@@ -53,7 +53,7 @@ for mod_name in ha_modules:
 
 # Core decorators
 def mock_callback(func):
-    """Décorateur callback transparent."""
+    """Transparent callback decorator."""
     return func
 
 
@@ -67,9 +67,9 @@ sys.modules["homeassistant"].core.callback = mock_callback
 sys.modules["homeassistant.components.diagnostics"].async_redact_data.side_effect = lambda data, to_redact: data
 
 
-# Classes de base pour éviter le conflit de métaclasse avec MagicMock
+# Base entity classes to avoid metaclass conflicts with MagicMock
 class MockEntity:
-    """Mock Entity Home Assistant."""
+    """Home Assistant mock Entity."""
 
     def __init__(self, *args, **kwargs):
         pass
@@ -155,7 +155,7 @@ sensor_mod.SensorStateClass.MEASUREMENT = "measurement"
 
 restore_mod.RestoreEntity = MockRestoreEntity
 
-# Constantes et types standard Home Assistant
+# Standard Home Assistant constants and types
 import homeassistant.const as ha_const  # noqa: E402
 
 ha_const.Platform = MagicMock()
@@ -175,12 +175,12 @@ ha_const.UnitOfEnergy.KILO_WATT_HOUR = "kWh"
 ha_const.UnitOfTime = MagicMock()
 ha_const.UnitOfTime.HOURS = "h"
 
-# Sélecteurs Home Assistant
+# Home Assistant selectors
 import homeassistant.helpers.selector as selector  # noqa: E402
 
 
 class MockSelector:
-    """Mock générique pour les sélecteurs UI de Home Assistant."""
+    """Generic mock for Home Assistant UI selectors."""
 
     def __init__(self, *args, **kwargs):
         self.args = args
@@ -207,7 +207,7 @@ import homeassistant.config_entries as ce  # noqa: E402
 
 
 class MockConfigFlow:
-    """Mock ConfigFlow pour tests unitaires."""
+    """Mock ConfigFlow for unit testing."""
 
     def __init_subclass__(cls, domain=None, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -237,7 +237,7 @@ class MockConfigFlow:
 
 
 class MockOptionsFlow:
-    """Mock OptionsFlow pour tests unitaires."""
+    """Mock OptionsFlow for unit testing."""
 
     def __init__(self, config_entry=None):
         self.config_entry = config_entry
@@ -255,7 +255,7 @@ class MockOptionsFlow:
 
 
 class MockConfigEntry:
-    """Mock ConfigEntry représentant une instance configurée."""
+    """Mock ConfigEntry representing a configured integration instance."""
 
     def __init__(self, entry_id: str, title: str, data: dict, options: dict | None = None):
         self.entry_id = entry_id

@@ -1,4 +1,4 @@
-"""Tests pour les sécurités plancher chauffant et le Shadow Mode."""
+"""Unit tests for floor heating safety cutoffs and Shadow (dry-run) Mode."""
 
 from unittest.mock import MagicMock
 
@@ -14,7 +14,7 @@ def evaluate_heating_decision(
     max_floor_temp: float = 28.0,
     min_floor_temp: float = 14.0,
 ) -> tuple[bool, str]:
-    """Extrait de la logique décisionnelle de _async_control_heating pour test unitaire pur."""
+    """Pure unit test helper reproducing decision logic in _async_control_heating."""
     error = target_temp - cur_temp
     projected_error = target_temp - temp_projected
     should_heat = False
@@ -29,12 +29,12 @@ def evaluate_heating_decision(
             should_heat = True
             reason = f"Anticipated thermal drop: projected {temp_projected}°C in {dead_time}h"
 
-    # Surchauffe
+    # Overshoot cutoff
     if error < -0.6 or (projected_error < -0.8 and cur_temp >= target_temp):
         should_heat = False
         reason = f"Overshoot prevention cutoff: curr {cur_temp}°C"
 
-    # Garde-fou boucle d'eau / plancher
+    # Floor / water loop safeguards
     if floor_temp is not None:
         if floor_temp >= max_floor_temp:
             should_heat = False
@@ -47,8 +47,8 @@ def evaluate_heating_decision(
 
 
 def test_dtu_max_floor_cutoff():
-    """Vérifie que la surchauffe d'eau (>= 28°C) coupe la chauffe même si l'air appelle."""
-    # L'air est à 17.5°C pour consigne 19.0°C (fort appel thermique en Heures Creuses)
+    """Verify excessive floor/water loop temperature (>= 28°C) cuts heating even if air calls for heat."""
+    # Air is at 17.5°C with target 19.0°C (strong demand during off-peak)
     should_heat, reason = evaluate_heating_decision(
         cur_temp=17.5,
         target_temp=19.0,
@@ -56,7 +56,7 @@ def test_dtu_max_floor_cutoff():
         dead_time=2.25,
         outdoor_temp=2.0,
         off_peak_active=True,
-        floor_temp=28.2,  # Dalle saturée
+        floor_temp=28.2,  # Slab saturated
         max_floor_temp=28.0,
     )
     assert should_heat is False
@@ -64,7 +64,7 @@ def test_dtu_max_floor_cutoff():
 
 
 def test_floor_freeze_protection():
-    """Vérifie qu'un plancher sous 14°C force la chauffe même si consigne atteinte."""
+    """Verify floor slab below 14°C forces heating even if target ambient is reached."""
     should_heat, reason = evaluate_heating_decision(
         cur_temp=20.0,
         target_temp=19.0,
@@ -72,7 +72,7 @@ def test_floor_freeze_protection():
         dead_time=2.25,
         outdoor_temp=-5.0,
         off_peak_active=False,
-        floor_temp=12.0,  # Risque gel dalle
+        floor_temp=12.0,  # Slab freeze risk
         min_floor_temp=14.0,
     )
     assert should_heat is True
@@ -80,19 +80,19 @@ def test_floor_freeze_protection():
 
 
 def test_dry_run_does_not_call_physical_switch():
-    """Vérifie que le mode dry-run ne déclenche aucun service switch réel."""
+    """Verify dry-run mode does not call physical switch services."""
     dry_run = True
     heater_entity = "switch.relais_compresseurs_salon"
     mock_service_call = MagicMock()
 
-    # Logique d'allumage sécurisé
+    # Safe switching logic
     if dry_run:
-        # Simulation : pas d'appel de service switch
+        # Simulation: no physical switch call
         if heater_entity.startswith("input_boolean."):
             mock_service_call("input_boolean", "turn_on")
     else:
         domain = heater_entity.split(".")[0]
         mock_service_call(domain, "turn_on")
 
-    # Vérification formelle : 0 appel au switch physique
+    # Formal check: 0 calls to physical switch
     assert mock_service_call.call_count == 0

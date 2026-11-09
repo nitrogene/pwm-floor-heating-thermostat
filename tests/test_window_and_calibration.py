@@ -1,4 +1,4 @@
-"""Tests unitaires pour la détection de fenêtre ouverte et l'auto-calibration passive (Mode A)."""
+"""Unit tests for window aeration detection and passive heat loss auto-calibration (Mode A)."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -17,23 +17,23 @@ def evaluate_window_and_calibration_decision(
     slab_tau_hours: float,
     current_measured_ua: float | None = None,
 ) -> tuple[bool, str, float | None]:
-    """Simule la logique combinée de fenêtre ouverte et de calibration U*A."""
+    """Simulate combined logic for open window suspension and U*A calibration."""
     error = target_temp - cur_temp
     projected_error = target_temp - temp_projected
     should_heat = False
     reason = "Idle"
 
-    # Décision normale de chauffe
+    # Normal heating decision
     if projected_error > 0.15 or error > 0.2:
         should_heat = True
         reason = f"Anticipated drop: {temp_projected}°C"
 
-    # Règle E : Fenêtre ouverte
+    # Rule E: Open window
     if window_open:
         should_heat = False
         reason = "Open window / ventilation detected. Heating suspended."
 
-    # Calibration Mode A
+    # Mode A calibration
     measured_ua = current_measured_ua
     if (
         fsm_state in ["idle", "waiting_min_off"]
@@ -59,7 +59,7 @@ def evaluate_window_and_calibration_decision(
 
 
 def test_window_open_blocks_heating():
-    """Vérifie qu'une fenêtre ouverte suspend immédiatement l'allumage."""
+    """Verify open window immediately suspends heating demand."""
     should_heat, reason, _ = evaluate_window_and_calibration_decision(
         cur_temp=18.5,
         target_temp=19.0,
@@ -78,7 +78,7 @@ def test_window_open_blocks_heating():
 
 
 def test_window_closed_resumes_heating():
-    """Vérifie que la refermeture de la fenêtre rétablit la demande de chauffe."""
+    """Verify closing window restores heating demand."""
     should_heat, reason, _ = evaluate_window_and_calibration_decision(
         cur_temp=18.5,
         target_temp=19.0,
@@ -97,26 +97,26 @@ def test_window_closed_resumes_heating():
 
 
 def test_window_auto_detection_slope():
-    """Vérifie la détection par rupture brutale de pente sur historique 15 min."""
+    """Verify detection via sudden slope drop over 15-min history."""
     now = datetime.now(UTC)
     history = [
         (now - timedelta(minutes=14), 20.2),
         (now - timedelta(minutes=10), 19.9),
         (now - timedelta(minutes=5), 19.6),
-        (now, 19.3),  # Chute de 0.9°C en 14 min
+        (now, 19.3),  # 0.9°C drop in 14 min
     ]
     cur_temp = 19.3
     cutoff_15m = now - timedelta(minutes=15)
     recent = [v for t, v in history if t >= cutoff_15m]
     drop = max(recent) - cur_temp
-    assert drop >= 0.4  # Doit déclencher window_open
+    assert drop >= 0.4  # Triggers window_open
 
 
 def test_passive_heat_loss_calibration_mode_a():
-    """Vérifie le calcul et le filtrage de la déperdition mesurée U*A en repos nocturne."""
-    # Salle à 20.0°C, extérieur 5.0°C (Delta T = 15°C)
+    """Verify calculation and filtering of measured heat loss U*A during quiet night rest."""
+    # Room at 20.0°C, outdoor at 5.0°C (Delta T = 15°C)
     # H = 60 W/K, Tau = 15h -> C_eff = 900 Wh/K
-    # Si la pente naturelle est -1.0 °C/h : P_loss = 900 W -> UA = 900 / 15 = 60.0 W/K
+    # If natural slope is -1.0 °C/h: P_loss = 900 W -> UA = 900 / 15 = 60.0 W/K
     should_heat, _, measured_ua = evaluate_window_and_calibration_decision(
         cur_temp=20.0,
         target_temp=19.0,
@@ -135,7 +135,7 @@ def test_passive_heat_loss_calibration_mode_a():
 
 
 def test_passive_heat_loss_calibration_ignored_if_recently_heated():
-    """Vérifie que la calibration est ignorée tant que la dalle n'a pas dissipé son onde (> 2 * theta)."""
+    """Verify calibration is ignored until slab has dissipated thermal wave (> 2 * theta)."""
     _, _, measured_ua = evaluate_window_and_calibration_decision(
         cur_temp=20.0,
         target_temp=19.0,
@@ -144,7 +144,7 @@ def test_passive_heat_loss_calibration_ignored_if_recently_heated():
         outdoor_temp=5.0,
         window_open=False,
         fsm_state="idle",
-        time_since_stop_hours=2.0,  # Trop court (< 4.5h)
+        time_since_stop_hours=2.0,  # Too short (< 4.5h)
         dead_time_hours=2.25,
         heat_loss_wk=60.0,
         slab_tau_hours=15.0,
