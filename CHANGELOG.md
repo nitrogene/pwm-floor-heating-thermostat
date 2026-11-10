@@ -11,22 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Continuous-Discrete Kalata Filter with Velocity Low-Pass Smoothing**:
-  - Implemented continuous Kalata tracking formulation ($K_p = \sqrt{2}\omega_0, K_v = \omega_0^2$ where $\omega_0 = (q_{\text{proc}} / \sigma_v^2)^{0.25}$) that scales smoothly across arbitrary time steps $dt$, strictly eliminating mathematical gain singularities when $dt \to 0$.
-  - Added a first-order low-pass filter on temperature velocity ($\tau_v = 1.0\,\text{h}$) that completely eradicates the high-frequency $\pm 0.8^\circ\text{C} \dots \pm 1.2^\circ\text{C}$ sawtooth ripple caused by discrete Zigbee $0.1^\circ\text{C}$ stair-step quantization, yielding a smooth, continuous projected trajectory curve (`temp_projected_ahead`).
+  - Implemented continuous Kalata tracking formulation (`Kp = sqrt(2) * omega_0`, `Kv = omega_0^2` where `omega_0 = (q_proc / sigma_v^2)^0.25`) that scales smoothly across arbitrary time steps dt, strictly eliminating mathematical gain singularities when dt -> 0.
+  - Added a first-order low-pass filter on temperature velocity (`tau_v = 1.0 h`) that completely eradicates the high-frequency +/- 0.8°C to +/- 1.2°C sawtooth ripple caused by discrete Zigbee 0.1°C stair-step quantization, yielding a smooth, continuous projected trajectory curve (`temp_projected_ahead`).
   - Added sub-second deduplication guard in `_update_trajectory_projection` (< 1 second) to cleanly ignore redundant sensor trigger cascades.
 - **Dynamic Integration Version Resolution**:
   - Replaced hardcoded version strings across `device_info` and diagnostics with `get_integration_version()`, reading dynamically from `manifest.json`.
 - **Configurable Regulation Parameters via Options Flow**:
-  - `kalata_process_noise`: Filter process noise parameter $q_{\text{proc}}$ (default: $0.005\,(^\circ\text{C}/\text{h})^2/\text{h}$, adjustable from 0.001 to 0.100).
-  - `outdoor_precharge_max_temp`: Outdoor temperature ceiling for Off-Peak precharge in Rule A (default: $12.0^\circ\text{C}$, adjustable from 5.0 to 20.0).
-  - `comfort_safety_deficit`: Room deficit emergency override threshold in Rules D and G (default: $0.8^\circ\text{C}$, adjustable from 0.3 to 2.5).
-  - `rule_b_min_threshold`: Baseline minimum anticipation threshold for Peak-hour heating in Rule B (default: $0.25^\circ\text{C}$, adjustable from 0.10 to 1.00).
+  - `kalata_process_noise`: Filter process noise parameter q_proc (default: 0.005 (°C/h)²/h, adjustable from 0.001 to 0.100).
+  - `outdoor_precharge_max_temp`: Outdoor temperature ceiling for Off-Peak precharge in Rule A (default: 12.0°C, adjustable from 5.0 to 20.0).
+  - `comfort_safety_deficit`: Room deficit emergency override threshold in Rules D and G (default: 0.8°C, adjustable from 0.3 to 2.5).
+  - `rule_b_min_threshold`: Baseline minimum anticipation threshold for Peak-hour heating in Rule B (default: 0.25°C, adjustable from 0.10 to 1.00).
   - Complete English (`en.json`) and French (`fr.json`) localization for all new configuration parameters.
 - **Adaptive Rule B Trigger Threshold & RMS Diagnostic Metric**:
-  - Replaced rigid static $0.15^\circ\text{C}$ trigger in Rule B with an adaptive threshold scaled by statistical model uncertainty:
-    $$\text{threshold} = \max\Big(\text{rule\_b\_min\_threshold},\; 2.0 \cdot \text{RMS}(e_{\text{model}})\Big)$$
+  - Replaced rigid static 0.15°C trigger in Rule B with an adaptive threshold scaled by statistical model uncertainty:
+    `threshold = max(rule_b_min_threshold, 2.0 * RMS(model_error))`
     preventing spurious Peak-hour turn-ons triggered by background model/sensor noise.
-  - Added continuous 24h rolling RMS calculation of model error ($\text{RMS}(e_{\text{model}})$).
+  - Added continuous 24h rolling RMS calculation of model error (`model_error_rms`).
   - Exposed `model_error_rms`, `rule_b_threshold`, and `rule_b_min_threshold` attributes on the thermostat entity.
   - Added companion diagnostic sensor `model_error_rms` (`sensor.salon_model_error_rms`) to monitor digital twin fidelity on dashboards.
 
@@ -49,17 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Asymmetric duration scheduling between tariff windows: promotes deep, continuous multi-hour accumulation cycles during cheap Off-Peak hours while enforcing a bounded run cap during expensive Peak hours.
   - Configurable `peak_max_run_duration` (default: 45 minutes, selectable 30-180 min in Options Flow) automatically terminating top-up cycles once the cap is reached to allow injected heat pulses to diffuse through the slab.
   - Fully compliant with Danfoss minimum 30-minute runtime requirement.
-  - Automatic comfort emergency bypass (if room deficit $\ge 0.8^\circ\text{C}$) and floor frost protection bypass ($\le 14^\circ\text{C}$).
+  - Automatic comfort emergency bypass (if room deficit >= 0.8°C) and floor frost protection bypass (<= 14°C).
   - Exposed via `peak_max_run_duration_min` telemetry attribute and companion diagnostics.
 - **Wind Convective Heat Loss Amplification (`wind_sensor`)**:
   - Optional `wind_sensor` input integrating ambient wind speed into the 24h thermal energy quota.
-  - Above calm conditions ($15\text{ km/h}$), applies $+0.5\%\text{ /km/h}$ convective loss boost up to a strict $+25\%$ maximum ceiling.
+  - Above calm conditions (15 km/h), applies +0.5%/km/h convective loss boost up to a strict +25% maximum ceiling.
   - Disabled by default (sensor unset, multiplier 1.0).
   - Exposed via `wind_factor` and `wind_speed` telemetry attributes.
-- **Dynamic Calibration & Soft Adaptation of Slab Dead Time $\theta$ (`auto_calibrate_dead_time`)**:
+- **Dynamic Calibration & Soft Adaptation of Slab Dead Time Theta (`auto_calibrate_dead_time`)**:
   - Automatically identifies experimental transport dead time by detecting the temperature slope reversal point upon heating cycles.
   - Computes rolling average `dead_time_measured_hours` via 90/10 exponential filter with sample counter.
-  - Optional `auto_calibrate_dead_time: bool` (disabled by default) adjusting trajectory projection within a safe $\pm 25\%$ clamp of baseline configured $\theta$.
+  - Optional `auto_calibrate_dead_time: bool` (disabled by default) adjusting trajectory projection within a safe +/- 25% clamp of baseline configured theta.
   - Exposed via `effective_dead_time_hours`, `dead_time_measured_hours`, and `dead_time_samples_count`.
 
 ---
@@ -68,17 +68,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Slow Drift Ambient Supervisor (Anti-Integral Windup)**:
-  - Gentle, proportional trim ($K_{\text{ambient}} = 0.15\text{ /}^\circ\text{C}$) applied directly to the 24h daily energy quota based on room setpoint error.
-  - Strictly clamped between $[0.80, 1.25]$ (-20% to +25%), eliminating persistent steady-state room offsets without integral accumulation, windup, or cycling.
+  - Gentle, proportional trim (K_ambient = 0.15 / °C) applied directly to the 24h daily energy quota based on room setpoint error.
+  - Strictly clamped between [0.80, 1.25] (-20% to +25%), eliminating persistent steady-state room offsets without integral accumulation, windup, or cycling.
   - Exposed via `ambient_trim_ratio` telemetry attribute and companion diagnostics.
 - **Solar Irradiance Integration with Inviolable Morning Comfort Floor Guard**:
   - Optional `solar_sensor` configuration taking into account daytime solar irradiance (W/m² or illuminance).
-  - **Inviolable Morning Wake-Up Comfort Guard**: Before 09:00 AM local time or during nighttime Off-Peak recharge, solar credit is strictly locked to $0.0\text{ kWh}$, ensuring 100% full wake-up comfort and preventing under-heated morning floors based on afternoon solar forecasts.
-  - Solar credit is immediately suspended if room ambient temperature drops below target setpoint ($-0.3^\circ\text{C}$).
+  - **Inviolable Morning Wake-Up Comfort Guard**: Before 09:00 AM local time or during nighttime Off-Peak recharge, solar credit is strictly locked to 0.0 kWh, ensuring 100% full wake-up comfort and preventing under-heated morning floors based on afternoon solar forecasts.
+  - Solar credit is immediately suspended if room ambient temperature drops below target setpoint (-0.3°C).
   - Strictly bounded to maximum 25% quota deduction (`solar_credit_kwh`), preventing midday overshoots from south-facing windows while preserving base heating needs.
-- **Mode B Soft Self-Adaptation of Building Heat Loss ($H = U \cdot A$)**:
+- **Mode B Soft Self-Adaptation of Building Heat Loss (H = U * A)**:
   - Configurable `auto_calibrate_heat_loss: bool` option in UI Config Flow and Options Flow enabling automatic slow tuning of effective heat loss coefficient.
-  - Activates only after at least 3 validated unheated night decay samples, strictly clamped within $\pm 20\%$ of baseline configured $H$.
+  - Activates only after at least 3 validated unheated night decay samples, strictly clamped within +/- 20% of baseline configured H.
   - Exposed via `effective_heat_loss_wk` and `auto_calibrate_heat_loss` attributes.
 
 ---
