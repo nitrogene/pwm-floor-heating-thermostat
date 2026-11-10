@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.7] - 2026-11-10
+
+### Added
+- **Continuous-Discrete Kalata Filter with Velocity Low-Pass Smoothing**:
+  - Implemented continuous Kalata tracking formulation ($K_p = \sqrt{2}\omega_0, K_v = \omega_0^2$ where $\omega_0 = (q_{\text{proc}} / \sigma_v^2)^{0.25}$) that scales smoothly across arbitrary time steps $dt$, strictly eliminating mathematical gain singularities when $dt \to 0$.
+  - Added a first-order low-pass filter on temperature velocity ($\tau_v = 1.0\,\text{h}$) that completely eradicates the high-frequency $\pm 0.8^\circ\text{C} \dots \pm 1.2^\circ\text{C}$ sawtooth ripple caused by discrete Zigbee $0.1^\circ\text{C}$ stair-step quantization, yielding a smooth, continuous projected trajectory curve (`temp_projected_ahead`).
+  - Added sub-second deduplication guard in `_update_trajectory_projection` (< 1 second) to cleanly ignore redundant sensor trigger cascades.
+- **Dynamic Integration Version Resolution**:
+  - Replaced hardcoded version strings across `device_info` and diagnostics with `get_integration_version()`, reading dynamically from `manifest.json`.
+- **Configurable Regulation Parameters via Options Flow**:
+  - `kalata_process_noise`: Filter process noise parameter $q_{\text{proc}}$ (default: $0.005\,(^\circ\text{C}/\text{h})^2/\text{h}$, adjustable from 0.001 to 0.100).
+  - `outdoor_precharge_max_temp`: Outdoor temperature ceiling for Off-Peak precharge in Rule A (default: $12.0^\circ\text{C}$, adjustable from 5.0 to 20.0).
+  - `comfort_safety_deficit`: Room deficit emergency override threshold in Rules D and G (default: $0.8^\circ\text{C}$, adjustable from 0.3 to 2.5).
+  - `rule_b_min_threshold`: Baseline minimum anticipation threshold for Peak-hour heating in Rule B (default: $0.25^\circ\text{C}$, adjustable from 0.10 to 1.00).
+  - Complete English (`en.json`) and French (`fr.json`) localization for all new configuration parameters.
+- **Adaptive Rule B Trigger Threshold & RMS Diagnostic Metric**:
+  - Replaced rigid static $0.15^\circ\text{C}$ trigger in Rule B with an adaptive threshold scaled by statistical model uncertainty:
+    $$\text{threshold} = \max\Big(\text{rule\_b\_min\_threshold},\; 2.0 \cdot \text{RMS}(e_{\text{model}})\Big)$$
+    preventing spurious Peak-hour turn-ons triggered by background model/sensor noise.
+  - Added continuous 24h rolling RMS calculation of model error ($\text{RMS}(e_{\text{model}})$).
+  - Exposed `model_error_rms`, `rule_b_threshold`, and `rule_b_min_threshold` attributes on the thermostat entity.
+  - Added companion diagnostic sensor `model_error_rms` (`sensor.salon_model_error_rms`) to monitor digital twin fidelity on dashboards.
+
+### Changed
+- **Mode A Heat Loss & Dead Time Identification Noise Immunity**:
+  - Switched passive calibration checks to consume the smoothed derivative `_derivative_smooth` instead of the raw quantized rate, protecting slab parameter estimation against measurement jitter.
+
+### Fixed
+- **Startup Redundant Projection Call**:
+  - Removed duplicate `_update_trajectory_projection` execution in `_async_read_sensors` right before `_async_control_heating`.
+- **Cleaned Dead Assignment**:
+  - Removed write-only `self._heating_start_temp = self._cur_temp` assignment in `_async_start_heating_safe`.
+
+---
+
 ## [0.2.6] - 2026-11-09
 
 ### Added

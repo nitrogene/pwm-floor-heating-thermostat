@@ -26,7 +26,14 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, FSM_IDLE, FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL, FSM_WAITING_MIN_OFF
+from .const import (
+    DOMAIN,
+    FSM_IDLE,
+    FSM_RUNNING_MIN_LOCK,
+    FSM_RUNNING_NORMAL,
+    FSM_WAITING_MIN_OFF,
+    INTEGRATION_VERSION,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,6 +75,15 @@ SENSOR_TYPES: tuple[PwmSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda t: t._model_error if hasattr(t, "_model_error") else None,
+    ),
+    PwmSensorEntityDescription(
+        key="model_error_rms",
+        translation_key="model_error_rms",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda t: t._model_error_rms if hasattr(t, "_model_error_rms") else None,
     ),
     PwmSensorEntityDescription(
         key="energy_quota_24h_kwh",
@@ -168,7 +184,7 @@ class PwmDiagnosticSensor(SensorEntity):
             name=self._entry.title,
             manufacturer="Nitrogene",
             model="PWM Thermodynamic Underfloor Thermostat",
-            sw_version="0.2.6",
+            sw_version=INTEGRATION_VERSION,
         )
 
     async def async_added_to_hass(self) -> None:

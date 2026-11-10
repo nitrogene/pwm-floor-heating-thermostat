@@ -33,10 +33,14 @@ from homeassistant.const import (
     ATTR_TEMPERATURE,
     CONF_NAME,
     CONF_UNIQUE_ID,
-    EVENT_HOMEASSISTANT_START,
     PRECISION_TENTHS,
     UnitOfTemperature,
 )
+
+try:
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+except ImportError:
+    from homeassistant.const import EVENT_HOMEASSISTANT_START as EVENT_HOMEASSISTANT_STARTED  # type: ignore[no-redef]
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -60,15 +64,18 @@ from .const import (
     ATTR_DEAD_TIME_SAMPLES_COUNT,
     ATTR_EFFECTIVE_DEAD_TIME_HOURS,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
+    ATTR_KALATA_PROCESS_NOISE,
+    ATTR_MODEL_ERROR_RMS,
+    ATTR_RULE_B_THRESHOLD,
     ATTR_SOLAR_CREDIT_KWH,
     ATTR_WIND_FACTOR,
     ATTR_WIND_SPEED,
     AUTO_CALIBRATE_MAX_DEVIATION,
     AUTO_CALIBRATE_MIN_SAMPLES,
-    COMFORT_SAFETY_DEFICIT_OVERRIDE,
     CONF_AUTO_CALIBRATE_DEAD_TIME,
     CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
+    CONF_COMFORT_SAFETY_DEFICIT,
     CONF_COMFORT_TEMP,
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
@@ -79,6 +86,7 @@ from .const import (
     CONF_HEAT_LOSS,
     CONF_HEATER,
     CONF_HEURES_CREUSES_SENSOR,
+    CONF_KALATA_PROCESS_NOISE,
     CONF_MAX_CYCLES_PER_DAY,
     CONF_MAX_FLOOR_TEMP,
     CONF_MIN_CYCLE_DURATION,
@@ -86,9 +94,11 @@ from .const import (
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
+    CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
     CONF_OUTDOOR_SENSOR,
     CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
+    CONF_RULE_B_MIN_THRESHOLD,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
@@ -104,11 +114,13 @@ from .const import (
     DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
     DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
+    DEFAULT_COMFORT_SAFETY_DEFICIT,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
     DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HEAT_LOSS,
+    DEFAULT_KALATA_PROCESS_NOISE,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MAX_TEMP,
@@ -117,8 +129,10 @@ from .const import (
     DEFAULT_MIN_OFF,
     DEFAULT_MIN_TEMP,
     DEFAULT_NAME,
+    DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_PEAK_MAX_RUN_DURATION,
     DEFAULT_POWER_WATTS,
+    DEFAULT_RULE_B_MIN_THRESHOLD,
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_STAGGER_DELAY,
     DEFAULT_TARGET_TEMP,
@@ -130,7 +144,7 @@ from .const import (
     FSM_RUNNING_MIN_LOCK,
     FSM_RUNNING_NORMAL,
     FSM_WAITING_MIN_OFF,
-    OUTDOOR_PRECHARGE_MAX_TEMP,
+    INTEGRATION_VERSION,
     POST_AIRING_MAX_DERIVATIVE,
     POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
@@ -186,6 +200,18 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(
             CONF_PEAK_MAX_RUN_DURATION, default=DEFAULT_PEAK_MAX_RUN_DURATION
         ): cv.time_period,
+        vol.Optional(
+            CONF_KALATA_PROCESS_NOISE, default=DEFAULT_KALATA_PROCESS_NOISE
+        ): vol.Coerce(float),
+        vol.Optional(
+            CONF_OUTDOOR_PRECHARGE_MAX_TEMP, default=DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP
+        ): vol.Coerce(float),
+        vol.Optional(
+            CONF_COMFORT_SAFETY_DEFICIT, default=DEFAULT_COMFORT_SAFETY_DEFICIT
+        ): vol.Coerce(float),
+        vol.Optional(
+            CONF_RULE_B_MIN_THRESHOLD, default=DEFAULT_RULE_B_MIN_THRESHOLD
+        ): vol.Coerce(float),
     }
 )
 
@@ -354,13 +380,29 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._last_day_reset = dt_util.now().date()
 
         # Predictive engine & continuous-discrete state observer (Kalman 1D alpha-beta)
+        self._kalata_process_noise: float = float(
+            config.get(CONF_KALATA_PROCESS_NOISE, DEFAULT_KALATA_PROCESS_NOISE)
+        )
+        self._outdoor_precharge_max_temp: float = float(
+            config.get(CONF_OUTDOOR_PRECHARGE_MAX_TEMP, DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP)
+        )
+        self._comfort_safety_deficit: float = float(
+            config.get(CONF_COMFORT_SAFETY_DEFICIT, DEFAULT_COMFORT_SAFETY_DEFICIT)
+        )
+        self._rule_b_min_threshold: float = float(
+            config.get(CONF_RULE_B_MIN_THRESHOLD, DEFAULT_RULE_B_MIN_THRESHOLD)
+        )
+        self._current_rule_b_threshold: float = self._rule_b_min_threshold
         self._temp_history: list[tuple[datetime, float]] = []
         self._filtered_temp: float | None = None
         self._temp_derivative: float = 0.0
+        self._derivative_smooth: float = 0.0
         self._temp_projected: float | None = None
         self._observer_last_update: datetime | None = None
         self._projection_history: list[tuple[datetime, float]] = []
         self._model_error: float | None = None
+        self._model_error_rms: float | None = None
+        self._model_error_history: list[tuple[datetime, float]] = []
         self._was_window_open: bool = False
         self._window_recovery_until: datetime | None = None
 
@@ -408,6 +450,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if "temp_derivative_hourly" in old_attrs and old_attrs["temp_derivative_hourly"] is not None:
                 try:
                     self._temp_derivative = float(old_attrs["temp_derivative_hourly"])
+                    self._derivative_smooth = self._temp_derivative
                 except (ValueError, TypeError):
                     pass
             if "temp_projected_ahead" in old_attrs and old_attrs["temp_projected_ahead"] is not None:
@@ -434,6 +477,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if "model_error" in old_attrs and old_attrs["model_error"] is not None:
                 try:
                     self._model_error = float(old_attrs["model_error"])
+                except (ValueError, TypeError):
+                    pass
+            if "model_error_rms" in old_attrs and old_attrs["model_error_rms"] is not None:
+                try:
+                    self._model_error_rms = float(old_attrs["model_error_rms"])
                 except (ValueError, TypeError):
                     pass
             if old_preset := old_attrs.get("preset_mode"):
@@ -528,7 +576,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self.hass.is_running:
             _async_startup()
         else:
-            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, _async_startup)
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_startup)
 
     @property
     def unique_id(self) -> str | None:
@@ -544,7 +592,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 name=self._name,
                 manufacturer="Nitrogene",
                 model="PWM Thermodynamic Underfloor Thermostat",
-                sw_version="0.2.6",
+                sw_version=INTEGRATION_VERSION,
             )
         return None
 
@@ -659,11 +707,17 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ATTR_DEAD_TIME_MEASURED_HOURS: self._dead_time_measured_hours,
             ATTR_DEAD_TIME_SAMPLES_COUNT: self._dead_time_samples_count,
             "auto_calibrate_dead_time": self._auto_calibrate_dead_time,
-            "temp_derivative_hourly": round(self._temp_derivative, 3),
+            ATTR_KALATA_PROCESS_NOISE: self._kalata_process_noise,
+            "outdoor_precharge_max_temp": self._outdoor_precharge_max_temp,
+            "comfort_safety_deficit": self._comfort_safety_deficit,
+            "temp_derivative_hourly": round(self._derivative_smooth, 3),
             "temp_projected_ahead": (
                 round(self._temp_projected, 2) if self._temp_projected is not None else None
             ),
             "model_error": self._model_error,
+            ATTR_MODEL_ERROR_RMS: self._model_error_rms,
+            ATTR_RULE_B_THRESHOLD: self._current_rule_b_threshold,
+            "rule_b_min_threshold": self._rule_b_min_threshold,
             "heat_loss_factor_wk": self._heat_loss,
             ATTR_EFFECTIVE_HEAT_LOSS_WK: self._effective_heat_loss,
             "auto_calibrate_heat_loss": self._auto_calibrate_heat_loss,
@@ -886,6 +940,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._cur_temp is None:
             return
 
+        # Deduplication guard: ignore sub-second duplicate calls (< 1 second)
+        if self._observer_last_update is not None:
+            if (now - self._observer_last_update).total_seconds() < 1.0:
+                return
+
         # Maintain 15-minute history window for rapid thermal drop / ventilation detection
         self._temp_history.append((now, self._cur_temp))
         cutoff_15m = now - timedelta(minutes=15)
@@ -896,12 +955,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._window_recovery_until = now + timedelta(minutes=POST_AIRING_RECOVERY_MINUTES)
             # Reset derivative on window closure: air warming back against slab is not slab overheating
             self._temp_derivative = 0.0
+            self._derivative_smooth = 0.0
         self._was_window_open = self._window_open
 
         # Clean filter initialization on first reading (prevents startup spike to 19°C)
         if self._filtered_temp is None or self._observer_last_update is None:
             self._filtered_temp = self._cur_temp
             self._temp_derivative = 0.0
+            self._derivative_smooth = 0.0
             self._observer_last_update = now
             self._temp_projected = self._cur_temp
             self._projection_history.append((now, self._temp_projected))
@@ -914,6 +975,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 # Large time gap (e.g. extended HA shutdown) -> realign state immediately
                 self._filtered_temp = self._cur_temp
                 self._temp_derivative = 0.0
+                self._derivative_smooth = 0.0
             else:
                 # 1. State prediction
                 t_pred = self._filtered_temp + (dt * self._temp_derivative)
@@ -922,22 +984,28 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 # 2. Innovation (residual)
                 innov = self._cur_temp - t_pred
 
-                # 3. Optimal alpha-beta gains via Kalata tracking relationship
-                # Measurement quantization noise variance for 0.1°C resolution: R = 0.1^2 / 12 ~= 0.000833
-                # Process noise parameter (slab thermal acceleration bound): q = 1.0 (°C/h)^2/h
+                # 3. Continuous-discrete Kalata tracking gains
+                # Measurement quantization noise variance for 0.1°C resolution: R = sigma_v^2 = 0.1^2 / 12 ~= 0.0008333
+                # Process noise parameter q_proc: configurable via options (default 0.005 (°C/h)^2/h)
                 var_r = 0.0008333
-                q_proc = 1.0
-                lambda_k = (q_proc * (dt ** 2)) / math.sqrt(var_r)
-                r_k = (4.0 + lambda_k - math.sqrt(max(0.0, 8.0 * lambda_k + (lambda_k ** 2)))) / 4.0
-                alpha = max(0.01, min(0.9, 1.0 - (r_k ** 2)))
-                beta = max(0.0001, min(0.8, 2.0 * (2.0 - alpha) - 4.0 * math.sqrt(max(0.0, 1.0 - alpha))))
+                sigma_v = math.sqrt(var_r)
+                q_proc = max(0.0001, self._kalata_process_noise)
+                omega_0 = (q_proc / (sigma_v ** 2)) ** 0.25
+                K_p = math.sqrt(2.0) * omega_0
+                K_v = omega_0 ** 2
+
+                alpha = min(0.5, K_p * dt)
+                beta_over_dt = K_v * dt
 
                 # 4. State correction
                 self._filtered_temp = t_pred + (alpha * innov)
-                self._temp_derivative = v_pred + ((beta / dt) * innov)
+                self._temp_derivative = max(-2.5, min(2.5, v_pred + (beta_over_dt * innov)))
 
-                # Physical bounds on derivative [-2.5, +2.5] °C/h
-                self._temp_derivative = max(-2.5, min(2.5, self._temp_derivative))
+                # 5. Low-pass filter on derivative (tau_v = 1.0 hour) to eradicate Zigbee stair-step noise
+                tau_v = 1.0  # 1 hour thermal velocity time constant
+                alpha_v = min(1.0, dt / tau_v)
+                self._derivative_smooth += alpha_v * (self._temp_derivative - self._derivative_smooth)
+                self._derivative_smooth = max(-2.5, min(2.5, self._derivative_smooth))
 
             self._observer_last_update = now
 
@@ -948,11 +1016,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             effective_deriv = 0.0
         elif in_recovery:
             # Post-airing rebound: cold air warms back against warm surfaces, clamp positive derivative
-            effective_deriv = min(POST_AIRING_MAX_DERIVATIVE, max(-0.5, self._temp_derivative))
+            effective_deriv = min(POST_AIRING_MAX_DERIVATIVE, max(-0.5, self._derivative_smooth))
         else:
-            effective_deriv = self._temp_derivative
+            effective_deriv = self._derivative_smooth
 
-        # Projected trajectory at t + theta (computed from filtered temperature)
+        # Projected trajectory at t + theta (computed from filtered temperature & smoothed derivative)
         self._temp_projected = self._filtered_temp + (self._effective_dead_time * effective_deriv)
 
         # Record projection for continuous model error evaluation
@@ -979,6 +1047,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         if past_proj is not None:
             self._model_error = round(self._cur_temp - past_proj, 2)
+            self._model_error_history.append((now, self._model_error))
+
+            # Prune error history to rolling 24-hour window
+            cutoff_rms = now - timedelta(hours=24)
+            self._model_error_history = [
+                (t, err) for t, err in self._model_error_history if t >= cutoff_rms
+            ]
+
+            # Compute RMS over rolling 24h window
+            if self._model_error_history:
+                sum_sq = sum(err ** 2 for _, err in self._model_error_history)
+                self._model_error_rms = round(
+                    math.sqrt(sum_sq / len(self._model_error_history)), 2
+                )
 
     def _async_read_sensors(self) -> None:
         """Synchronize states from configured sensors."""
@@ -988,7 +1070,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._cur_temp = float(st_in.state)
                 now_utc = dt_util.utcnow()
                 self._check_window_open_state(now_utc)
-                self._update_trajectory_projection(now_utc)
             except ValueError:
                 pass
 
@@ -1152,7 +1233,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
             # Rule A: Priority thermal precharge during Off-Peak hours
             if off_peak_active:
-                if error >= -0.5 and self._outdoor_temp <= OUTDOOR_PRECHARGE_MAX_TEMP:
+                if error >= -0.5 and self._outdoor_temp <= self._outdoor_precharge_max_temp:
                     should_heat = True
                     self._decision_reason = (
                         f"Off-peak thermal precharge (ext: {self._outdoor_temp}°C, "
@@ -1160,11 +1241,19 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     )
             # Rule B: Peak hours heating only on anticipated trajectory drop
             else:
-                if projected_error > 0.15 or error > 0.2:
+                effective_rms = self._model_error_rms if self._model_error_rms is not None else 0.10
+                rule_b_threshold = max(
+                    self._rule_b_min_threshold,
+                    round(2.0 * effective_rms, 2),
+                )
+                self._current_rule_b_threshold = rule_b_threshold
+
+                if projected_error > rule_b_threshold or error > self._rule_b_min_threshold:
                     should_heat = True
                     self._decision_reason = (
                         f"Anticipated thermal drop: projected {round(proj_val, 2)}°C in {self._dead_time}h "
-                        f"(slope: {round(self._temp_derivative, 3)}°C/h, below target {self._target_temp}°C)"
+                        f"(slope: {round(self._derivative_smooth, 3)}°C/h, threshold: {rule_b_threshold}°C, "
+                        f"below target {self._target_temp}°C)"
                     )
 
             # Rule C: Surface and ambient overshoot protection (+0.6°C real or projected > target + 0.8°C)
@@ -1192,7 +1281,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._quota_blocked = False
 
             if should_heat and not off_peak_active and quota_enforcement_active and quota_exceeded:
-                if error < COMFORT_SAFETY_DEFICIT_OVERRIDE:
+                if error < self._comfort_safety_deficit:
                     should_heat = False
                     self._quota_blocked = True
                     self._decision_reason = (
@@ -1233,7 +1322,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             is_freeze_emergency = self._floor_temp is not None and self._floor_temp <= self._min_floor_temp
             is_comfort_emergency = (
                 self._cur_temp is not None
-                and (self._target_temp - self._cur_temp) >= COMFORT_SAFETY_DEFICIT_OVERRIDE
+                and (self._target_temp - self._cur_temp) >= self._comfort_safety_deficit
             )
             if (
                 active_run_sec >= self._peak_max_run_duration.total_seconds()
@@ -1278,10 +1367,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             required_rest = 2.0 * self._dead_time * 3600.0  # Relaxed slab (> 2 * theta)
             delta_t = self._cur_temp - self._outdoor_temp
 
-            if time_since_stop >= required_rest and delta_t >= 3.0 and self._temp_derivative < -0.05:
+            if time_since_stop >= required_rest and delta_t >= 3.0 and self._derivative_smooth < -0.05:
                 # C_eff = slab_tau_hours * heat_loss_wk (in Wh/K)
                 c_eff = self._slab_tau * self._heat_loss
-                p_loss = -c_eff * self._temp_derivative  # Watts
+                p_loss = -c_eff * self._derivative_smooth  # Watts
                 sample_ua = p_loss / delta_t
 
                 # Disturbance filter: sample within [0.3 * H, 3.0 * H]
@@ -1301,7 +1390,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             and self._heating_start_derivative is not None
             and self._heating_start_derivative <= 0.0
         ):
-            if self._temp_derivative >= 0.05:
+            if self._derivative_smooth >= 0.05:
                 # Slope reversed from cooling/flat to active warming: heat wave has traversed the slab
                 measured_theta = (now_utc - self._cycle_start_time).total_seconds() / 3600.0
                 if 0.5 <= measured_theta <= 5.0:
@@ -1373,8 +1462,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
-        self._heating_start_temp = self._cur_temp
-        self._heating_start_derivative = self._temp_derivative
+        self._heating_start_derivative = self._derivative_smooth
         self._demand_start_time = None
         self._hvac_action = HVACAction.HEATING
         self._cycles_today += 1

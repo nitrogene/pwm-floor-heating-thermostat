@@ -21,6 +21,7 @@ from .const import (
     CONF_AUTO_CALIBRATE_DEAD_TIME,
     CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
+    CONF_COMFORT_SAFETY_DEFICIT,
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
     CONF_ECO_TEMP,
@@ -28,13 +29,16 @@ from .const import (
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HEAT_LOSS,
     CONF_HEATER,
+    CONF_KALATA_PROCESS_NOISE,
     CONF_MAX_FLOOR_TEMP,
     CONF_MIN_FLOOR_TEMP,
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
+    CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
     CONF_OUTDOOR_SENSOR,
     CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
+    CONF_RULE_B_MIN_THRESHOLD,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
@@ -45,15 +49,19 @@ from .const import (
     DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
     DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
+    DEFAULT_COMFORT_SAFETY_DEFICIT,
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
     DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HEAT_LOSS,
+    DEFAULT_KALATA_PROCESS_NOISE,
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_NAME,
+    DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_POWER_WATTS,
+    DEFAULT_RULE_B_MIN_THRESHOLD,
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_WINDOW_DETECTION,
     DOMAIN,
@@ -401,6 +409,74 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         max=180,
                         step=5,
                         unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_KALATA_PROCESS_NOISE,
+                    default=float(
+                        curr.get(
+                            CONF_KALATA_PROCESS_NOISE,
+                            DEFAULT_KALATA_PROCESS_NOISE,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.001,
+                        max=0.100,
+                        step=0.001,
+                        unit_of_measurement="(°C/h)²/h",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
+                    default=float(
+                        curr.get(
+                            CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
+                            DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5.0,
+                        max=20.0,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_COMFORT_SAFETY_DEFICIT,
+                    default=float(
+                        curr.get(
+                            CONF_COMFORT_SAFETY_DEFICIT,
+                            DEFAULT_COMFORT_SAFETY_DEFICIT,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.3,
+                        max=2.5,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_RULE_B_MIN_THRESHOLD,
+                    default=float(
+                        curr.get(
+                            CONF_RULE_B_MIN_THRESHOLD,
+                            DEFAULT_RULE_B_MIN_THRESHOLD,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.10,
+                        max=1.00,
+                        step=0.05,
+                        unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),

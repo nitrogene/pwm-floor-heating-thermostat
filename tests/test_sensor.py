@@ -21,6 +21,7 @@ def mock_thermostat():
     t._temp_projected = 21.45
     t._temp_derivative = 0.352
     t._model_error = 0.08
+    t._model_error_rms = 0.12
     t._energy_needed_kwh = 4.25
     t._hours_needed_24h = 1.31
     t._total_heating_hours_today = 0.50
@@ -51,9 +52,9 @@ def test_sensor_setup_entry(mock_thermostat, mock_entry):
 
         await async_setup_entry(hass, mock_entry, mock_add_entities)
 
-        # 7 diagnostic sensors expected
+        # 8 diagnostic sensors expected
         assert len(added_entities) == len(SENSOR_TYPES)
-        assert len(added_entities) == 7
+        assert len(added_entities) == 8
 
         # Validate instantiated sensor properties
         sensor_map = {s.entity_description.key: s for s in added_entities}
@@ -71,6 +72,10 @@ def test_sensor_setup_entry(mock_thermostat, mock_entry):
         # 3. Model error
         s_err = sensor_map["model_error"]
         assert s_err.native_value == 0.08
+
+        # 4. Model error RMS
+        s_rms = sensor_map["model_error_rms"]
+        assert s_rms.native_value == 0.12
 
         # 4. 24h energy quota
         s_quota = sensor_map["energy_quota_24h_kwh"]

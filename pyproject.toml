@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pwm_floor_heating_thermostat"
-version = "0.2.6"
+version = "0.2.7"
 description = "A predictive, thermodynamic underfloor heating thermostat for Home Assistant"
 readme = "README.md"
 authors = [{ name = "Nitrogene" }]

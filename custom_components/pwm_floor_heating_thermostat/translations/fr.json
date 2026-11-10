@@ -60,7 +60,11 @@
           "wind_sensor": "Capteur de vitesse du vent / anémomètre",
           "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)",
           "auto_calibrate_dead_time": "Auto-adaptation douce du temps mort Thêta (Mode B)",
-          "peak_max_run_duration": "Durée maximale d'un cycle en Heures Pleines (minutes)"
+          "peak_max_run_duration": "Durée maximale d'un cycle en Heures Pleines (minutes)",
+          "kalata_process_noise": "Bruit de processus Kalata q_proc ((°C/h)²/h)",
+          "outdoor_precharge_max_temp": "Plafond température extérieure pour précharge HC (°C)",
+          "comfort_safety_deficit": "Seuil de déficit thermique de sécurité confort (°C)",
+          "rule_b_min_threshold": "Seuil plancher d'anticipation Règle B (°C)"
         }
       }
     }
@@ -75,6 +79,9 @@
       },
       "model_error": {
         "name": "Erreur de modèle"
+      },
+      "model_error_rms": {
+        "name": "Erreur quadratique moyenne modèle (RMS 24h)"
       },
       "energy_quota_24h_kwh": {
         "name": "Quota énergétique 24h"

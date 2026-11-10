@@ -1,6 +1,21 @@
 """Constants for the PWM Floor Heating Thermostat integration."""
 
+import json
 from datetime import timedelta
+from pathlib import Path
+
+
+def get_integration_version() -> str:
+    """Read version dynamically from manifest.json."""
+    try:
+        manifest_path = Path(__file__).parent / "manifest.json"
+        with open(manifest_path, encoding="utf-8") as f:
+            return str(json.load(f).get("version", "0.2.7"))
+    except Exception:
+        return "0.2.7"
+
+
+INTEGRATION_VERSION = get_integration_version()
 
 DOMAIN = "pwm_floor_heating_thermostat"
 
@@ -29,6 +44,14 @@ CONF_AUTO_CALIBRATE_HEAT_LOSS = "auto_calibrate_heat_loss"  # Mode B soft self-a
 DEFAULT_AUTO_CALIBRATE_HEAT_LOSS = False
 CONF_AUTO_CALIBRATE_DEAD_TIME = "auto_calibrate_dead_time"  # Soft self-adaptation of dead time theta
 DEFAULT_AUTO_CALIBRATE_DEAD_TIME = False
+CONF_KALATA_PROCESS_NOISE = "kalata_process_noise"  # Continuous Kalata process acceleration noise (q_proc)
+DEFAULT_KALATA_PROCESS_NOISE = 0.005  # Default 0.005 (°C/h)²/h for high-inertia underfloor slabs
+CONF_OUTDOOR_PRECHARGE_MAX_TEMP = "outdoor_precharge_max_temp"  # Max outdoor temp for off-peak precharge
+DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP = 12.0  # °C
+CONF_COMFORT_SAFETY_DEFICIT = "comfort_safety_deficit"  # Room deficit overriding peak-hour quota
+DEFAULT_COMFORT_SAFETY_DEFICIT = 0.8  # °C
+CONF_RULE_B_MIN_THRESHOLD = "rule_b_min_threshold"  # Minimum threshold for Rule B anticipated drop trigger
+DEFAULT_RULE_B_MIN_THRESHOLD = 0.25  # °C
 
 # Environmental sensors (solar irradiance & wind convective loss)
 CONF_SOLAR_SENSOR = "solar_sensor"
@@ -127,3 +150,6 @@ ATTR_WIND_SPEED = "wind_speed"
 ATTR_DEAD_TIME_MEASURED_HOURS = "dead_time_measured_hours"
 ATTR_DEAD_TIME_SAMPLES_COUNT = "dead_time_samples_count"
 ATTR_EFFECTIVE_DEAD_TIME_HOURS = "effective_dead_time_hours"
+ATTR_KALATA_PROCESS_NOISE = "kalata_process_noise"
+ATTR_MODEL_ERROR_RMS = "model_error_rms"
+ATTR_RULE_B_THRESHOLD = "rule_b_threshold"

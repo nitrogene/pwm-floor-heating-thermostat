@@ -1,135 +1,79 @@
 # Development Roadmap & Technical Specifications (TODO.md)
 
-This document tracks the technical roadmap, algorithmic specifications, and development milestones of the **PWM Floor Heating Thermostat** (`pwm_floor_heating_thermostat`) integration.
+This document tracks all **pending tasks, algorithmic improvements, and technical milestones** remaining to be implemented for the **PWM Floor Heating Thermostat** (`pwm_floor_heating_thermostat`) integration.
+All items are ordered from **most critical to least critical**.
 
 ---
 
-## 1. Thermodynamic Engine & Physical Modeling
+## 1. Critical Stability & Kalata Filter De-noising (Release v0.2.7) [COMPLETED]
 
-- [x] **Predictive Trajectory Projection with Dead Time ($\theta$):**
-  - [x] Filtered temperature derivative $dT/dt$ (°C/h) via robust moving linear regression window (60 min).
-  - [x] Projected ahead temperature calculation: $T_{\text{proj}}(t + \theta) = T_{\text{amb}}(t) + \theta \cdot \frac{dT_{\text{amb}}}{dt}$.
-  - [x] Inflection point detection (morning cold dip) $\theta$ hours ahead to trigger heating before ambient drops below target setpoint.
-  - [x] Telemetry attributes exposure: `temp_derivative_hourly` and `temp_projected_ahead`.
-- [x] **Dynamic Heat Gains & Environmental Losses:**
-  - [x] **Wind Convective Loss Amplification (`wind_sensor`):** Optional wind speed integration scaling building heat loss above 15 km/h (+0.5%/km/h, clamped to max +25%).
-  - [x] **Solar Irradiance Integration with Morning Comfort Guard (`solar_sensor`):** Daytime solar gain deduction bounded by max 25% quota reduction, with inviolable 0h-9h morning comfort guard preventing under-heated morning wake-up.
-- [ ] **Inter-Zone Convective Coupling:**
-  - [ ] Model passive thermal heat transfers between adjacent open spaces (e.g. warm air convective draft from Living Room to Mezzanine/Office).
-  - [x] **Multi-Zone Electrical Coordinator (`stagger_delay`):** Smooths grid power draws by staggering startup sequences across zones (preventing simultaneous 13 kW inrush).
-- [x] **Self-Calibration & Continuous Learning:**
-  - [x] Periodic heat loss estimation $H = U \cdot A$ (W/K) via passive unheated night decay periods.
-  - [x] **Mode A (Advisory Passive Telemetry):** Telemetry attribute `heat_loss_measured_wk` showing real-world measured building heat loss without altering active control.
-  - [x] **Mode B (Soft Auto-Adaptation `auto_calibrate_heat_loss: true`):**
-    - [x] Strict validation conditions (minimum 3 validated night decay samples).
-    - [x] Slow exponential smoothing IIR filter preventing sudden jumps.
-    - [x] Hard bounds clamped to $\pm 20\%$ of baseline configured $H$.
-  - [x] **Dynamic Calibration of Slab Dead Time $\theta$ (`auto_calibrate_dead_time`):** Experimental inflection point identification on active heating cycles with exponential filtering and optional $\pm 25\%$ soft adaptation.
+- [x] **Eradicate Sawtooth Oscillations on Projected Temperature ($T_{\text{projected}}$) (Completed in v0.2.7):**
+  Real-world telemetry revealed persistent $\pm 0.8^\circ\text{C}$ to $1.2^\circ\text{C}$ sawtooth oscillations on $T_{\text{projected}}$ occurring on every $0.1^\circ\text{C}$ discrete step of Zigbee ambient sensors:
+  - **Continuous-Discrete Kalata Formulation & Process Noise Tuning ($q_{\text{proc}}$):** Lowered process noise acceleration parameter $q_{\text{proc}}$ from `1.0` to `0.005` $(\text{°C/h})^2/\text{h}$ in [`climate.py`](custom_components/pwm_floor_heating_thermostat/climate.py) and applied continuous tracking gains $K_p = \sqrt{2}\omega_0, K_v = \omega_0^2$ with $\omega_0 = (q_{\text{proc}} / \sigma_v^2)^{0.25}$, completely eliminating gain explosion when $dt \to 0$.
+  - **Deduplicate Projection Updates in Heating Loop:** Eliminated duplicate projection calculation in `_async_read_sensors` right before `_async_control_heating`, and added a sub-second deduplication guard (< 1 second) in `_update_trajectory_projection`.
+  - **First-Order Low-Pass Filter on Derivative:** Applied a 1-hour first-order low-pass filter on the velocity derivative ($\tau_v = 1.0\,\text{h}$), feeding a smooth derivative into $T_{\text{projected}} = T_{\text{filtered}} + \theta \cdot (dT/dt)_{\text{smooth}}$, completely eliminating quantization ringing.
 
 ---
 
-## 2. Energy Scheduling, Danfoss FSM & Operation Modes
+## 2. Sensor Reliability & Hardware Safety Guards (Code Review)
 
-- [x] **Danfoss Finite State Machine (Mechanical Compressor Guard):**
-  - [x] Minimum ON cycle: 30 minutes (mandatory oil return to compressor crankcase).
-  - [x] Minimum OFF cycle: 15 minutes (full refrigerant pressure equalization between BP and HP).
-  - [x] Maximum daily cycle budget (mechanical anti-fatigue, max 6 cycles/day).
-- [x] **Shadow Mode & Digital Twin (Passive Dry-Run):**
-  - [x] `dry_run: true` setting ensuring zero physical relay switching.
-  - [x] Virtual helper support (`input_boolean.*`) to visualize simulated switching in the UI.
-  - [x] `observed_heater` parameter to listen to and benchmark against existing legacy thermostat in real time.
-  - [x] Explainability attributes: `simulated_heater_state`, `decision_reason`, and `dry_run`.
-- [x] **Hydronic Underfloor Systems & Loop Water Return Probes:**
-  - [x] Optional `floor_temp_sensor` parameter (direct water loop return probe monitoring).
-  - [x] Emergency slab anti-overshoot cutoff `max_floor_temp` (default 28.0°C compliant with DTU 65.14 standard).
-  - [x] Slab anti-freeze protection `min_floor_temp` (default 14.0°C).
-  - [x] Telemetry attributes `floor_temperature`, `max_floor_temperature`, `min_floor_temperature`.
-- [x] **Daily Energy Quota Enforcement & Anti-Peak Tariff Protection:**
-  - [x] `enforce_daily_quota` and `enforce_daily_quota_sensor` options for instant UI Lovelace toggle.
-  - [x] Automatic inhibition of Peak-Hour cycles once the 24h thermal budget has been satisfied during cheap Off-Peak hours.
-  - [x] Comfort safety fallback (forced startup if setpoint deficit $\ge 0.8$°C).
-  - [x] Realtime telemetry (`daily_quota_enforced`, `daily_quota_blocked`, `heating_hours_remaining_24h`).
-- [x] **Open Window / Rapid Ventilation Detection (`window_detection`):**
-  - [x] Automatic detection via rapid temperature drop rate ($dT/dt \le -1.5^\circ\text{C/h}$ or drop $> 0.4^\circ\text{C}$ in 15 min).
-  - [x] Support for physical magnetic contact sensors (`window_sensor: binary_sensor.*`) and Lovelace UI toggle (`window_detection_sensor: input_boolean.*`).
-  - [x] Instant heating suspension with `window_open` state and auto-recovery timer.
-- [x] **Multi-Zone Coordination & Startup Inrush Staggering (`stagger_delay`):**
-  - [x] Eliminates simultaneous multi-compressor startup spikes on Off-Peak switchover (e.g. 13 kW cumulative surge).
-  - [x] Configurable delay (e.g. `stagger_delay: "00:05:00"`) with live countdown attribute (`stagger_delay_sec`).
-- [x] **Native Home Assistant Presets (`Comfort`, `Eco`, `Away`):**
-  - [x] Registered native presets `preset_modes: ["comfort", "eco", "away"]`.
-  - [x] Dedicated setpoints `eco_temp` (default: 17.0°C) and `away_temp` (default: 15.0°C).
-  - [x] 1-click preset switching in Lovelace without losing nominal comfort setpoint.
-- [x] **Core Off-Peak Tariff Optimization & Anti-Peak Protection (Linky TIC):**
-  - [x] Realtime Linky TIC integration via `off_peak_sensor` (`binary_sensor.heures_creuses_nuit`).
-  - [x] Daily energy quota enforcement: blocks unnecessary Peak-Hour cycles once the daily thermal requirement is fulfilled.
-  - [x] Startup inrush staggering (`stagger_delay`) preventing 13 kW simultaneous power surges.
-  - [x] Absolute comfort fallback override (forces startup if setpoint deficit $\ge 0.8$°C).
-- [ ] **Advanced Dynamic Tariffs & Multi-Rate Schedulers (Future Roadmap):**
-  - [ ] Dynamic hourly spot-market tariff integration (EPEX Spot, NordPool, French EDF Tempo 6-color matrix).
-  - [x] **Adaptive PWM Period Modulation (`peak_max_run_duration`):** Deep multi-hour accumulation cycles in Off-Peak vs 45 min capped top-up cycles in Peak hours with thermal diffusion pauses.
-- [x] **Slow Drift Ambient Supervisor (Anti-Integral Windup):**
-  - [x] Gentle and bounded proportional trim on the 24h daily energy quota ($K_{\text{ambient}} = 0.15\text{ /}^\circ\text{C}$, clamped $[0.80, 1.25]$).
-  - [x] Permanent elimination of continuous divergent integrator windup and steady-state offsets.
+- [ ] **Stale Sensor Watchdog (Fail-Safe Heating Shutdown) :**
+  Prevent blind continuous heating if a Zigbee sensor battery dies or the mesh link freezes without Home Assistant marking it `unavailable`:
+  - Track update timestamps (`_cur_temp_ts`, `_outdoor_temp_ts`) on every incoming state change.
+  - Enforce a configurable stale threshold between **90 and 120 minutes** (adapted to typical Zigbee heartbeat keep-alives to eliminate false positives in thermally stable rooms).
+  - Transition FSM safely to `IDLE`, turn off active heating, expose `sensor_stale: true` attribute, and set an explicit reason in `decision_reason`.
+- [ ] **Software DTU 65.14 Slab Guards for Probe-less Installations :**
+  Provide software-level slab protection when no embedded loop water return probe (`floor_temp_sensor`) is present:
+  - **Thermal Runaway Cutoff :** Trigger emergency shutdown if ambient $dT/dt > +1.5^\circ\text{C/h}$ sustained for $> 30\,\text{min}$ during active heating.
+  - **Hard Ambient Overshoot Ceiling :** Immediate unconditional heating cutoff if $T_{\text{cur}} \ge T_{\text{target}} + 1.0^\circ\text{C}$.
+  - **Global Maximum Continuous Run Cap (`max_continuous_run`) :** Extend the maximum continuous run cap (120 min) across all tariff periods (including Off-Peak hours) to ensure mandatory thermal diffusion intervals in the heavy slab.
+  - **Emergency Comfort Deficit Bypass :** Unconditional emergency heating trigger if ambient temperature drops severely below target ($T_{\text{cur}} \le T_{\text{target}} - 1.5^\circ\text{C}$), overriding daily quota blocks.
 
 ---
 
-## 3. Advanced Telemetry & Debug Data for AI Calibration (Auto-Tuning)
+## 3. Algorithmic Refinement & Quota Forecast Stabilization
 
-- [x] **Internal Physical Model Variables Telemetry (Exposed in `extra_state_attributes`):**
-  - [x] `temp_projected_ahead`: Anticipated temperature at $t + \theta$ (°C).
-  - [x] `temp_derivative_hourly`: Filtered derivative $dT/dt$ (°C/h).
-  - [x] `daily_energy_quota_kwh`: Required 24h thermal quota calculated from weather forecast (`energy_quota_24h_kwh`).
-  - [x] `heating_hours_needed_24h`, `heating_hours_done_today`, `heating_hours_remaining_24h`: Realtime compressor hour budget accounting.
-  - [x] `duty_cycle_continuous`: Continuous theoretical requested duty ratio.
-  - [x] `heat_loss_factor_wk`: Active building heat loss coefficient.
-- [x] **FSM Instrumentation & Diagnostics (Exposed in `extra_state_attributes`):**
-  - [x] `fsm_state` (`idle`, `running_min_lock`, `running_normal`, `waiting_min_off`).
-  - [x] `cycles_count_today` and `max_cycles_budget` (`compressor_cycles_today`).
-  - [x] `time_to_next_allowed_start` (`min_off_lock_remaining_sec` pressure equalization countdown).
-  - [x] `min_cycle_lock_remaining_sec`: Mandatory oil return countdown.
-- [x] **Passive Identification & Self-Learning Telemetry:**
-  - [x] `heat_loss_measured_wk`: Passive unheated decay rate identification (Mode A).
-  - [x] `heat_loss_samples_count`: Validated night decay measurement count.
-- [x] **Model Error Metric ($e_{\text{model}}$):**
-  - [x] Realtime evaluation: $e_{\text{model}}(t) = T_{\text{measured}}(t) - T_{\text{projected}}(t - \theta)$ exposed in `model_error` attribute.
-  - [x] Linear interpolation across rolling projection history window.
-  - [x] State restoration across Home Assistant reboots via `RestoreEntity`.
-  - [x] Unit tested calculation (`tests/test_math.py`).
-- [x] **Automated Companion Diagnostic Sensors (`sensor` Platform):**
-  - [x] Dedicated `sensor.py` platform registering 7 companion diagnostic entities attached to the Device card.
-  - [x] Native Home Assistant SQLite / InfluxDB recording and graphing without external YAML template sensors.
-  - [x] Instant reactive dispatcher synchronization upon thermostat state updates (`async_dispatcher_connect`).
-  - [x] English and French localized translation keys.
+- [x] **Adaptive Rule B Trigger Threshold & RMS Diagnostic Metric (Completed in v0.2.7):**
+  - Replaced the rigid $0.15^\circ\text{C}$ fixed threshold with an adaptive threshold scaled by model uncertainty:
+    $$\text{threshold} = \max(\text{rule\_b\_min\_threshold},\; 2.0 \cdot \text{RMS}(e_{\text{model}}))$$
+    preventing spurious turn-ons triggered by background measurement noise.
+  - Aggregated continuous 24h rolling $\text{RMS}(e_{\text{model}})$ and exposed it as an entity attribute (`model_error_rms`, `rule_b_threshold`, `rule_b_min_threshold`) and as a dedicated companion diagnostic entity in `sensor.py`.
+  - Configurable `rule_b_min_threshold` baseline floor via `OptionsFlow`.
+- [ ] **Rolling 24h Forecast Weather Average for Daily Thermal Quota :**
+  - Stabilize daily energy quota calculation ($E_{\text{day}}$) by calculating outdoor delta against the rolling 24h average forecast from weather service rather than instantaneous temperature spikes or an inflexible fixed 04:00 AM snapshot.
+  - **Weather Outage Fallback :** In case weather entity is `unavailable`, gracefully fall back to the previous day's quota $+5\%$ or last valid reading with a warning log.
+  - **Unserved Quota Carry-Over :** Carry over unserved duty time to the next cycle/period when heating is temporarily suspended (e.g. by window opening or peak cap).
+  - **Configurable Precharge Sealing Seuil :** Move hardcoded `OUTDOOR_PRECHARGE_MAX_TEMP` (12.0°C) into `OptionsFlow` settings.
 
 ---
 
-## 4. Software Quality, Testing & HACS Ecosystem
+## 4. Code Quality, Deprecation Fixes & Architecture Modernization
 
-- [x] **HACS Compatibility:**
-  - [x] `hacs.json` configured with `"content_in_root": true`.
-  - [x] Standalone repository layout, MIT License, and comprehensive `README.md`.
-- [x] **CI/CD Validation Workflows (GitHub Actions):**
-  - [x] Manifest validator workflow (`hassfest`).
-  - [x] HACS compliance workflow (`hacs` action).
-  - [x] Code style and typing workflow (`ruff check`).
-  - [x] Automated unit test suite (`pytest`) validating Danfoss FSM transitions, linear regression math, and DTU 65.14 safeties.
-- [x] **Translations & Entity Metadata:**
-  - [x] Root metadata `strings.json`.
-  - [x] Full localization in English (`translations/en.json`) and French (`translations/fr.json`).
-- [x] **Config Flow & Options Flow (Native Home Assistant UI) [Priority 1]:**
-  - [x] Implemented `config_flow.py` allowing thermostat creation directly via UI (*Settings -> Devices & Services -> Add Integration*).
-  - [x] Implemented dynamic `OptionsFlow` for runtime tuning (Shadow Mode toggle, heat loss $H$, dead time $\theta$, presets, anti-peak delay) without restarting Home Assistant.
-  - [x] Resolved 500 error on Options Flow for Home Assistant 2024.4+ (safe `_config_entry` encapsulation).
-  - [x] Implemented native diagnostics platform `diagnostics.py` ("Download diagnostics" button with automatic token redaction).
-  - [x] Added standardized GitHub issue templates (`.github/ISSUE_TEMPLATE/bug_report.yml`, `feature_request.yml`).
-  - [x] Declared `"config_flow": true` in `manifest.json`.
-  - [x] Synchronized `strings.json` and translations (`translations/fr.json`, `translations/en.json`).
-  - [x] Connected entry setup and unload handlers (`async_setup_entry`, `async_unload_entry`) in `__init__.py` and `climate.py`.
-  - [x] Dedicated unit test suite (`tests/test_config_flow.py`, `tests/test_diagnostics.py`).
-- [x] **Official HACS Default Submission (PR on hacs/default) [Priority 2]:**
-  - [x] **Field Soak Test & Real-World Telemetry:** Validated on 24h real-world cycle across 3 zones (aeration freeze, Kalata quantization filtering, overshoot prevention, off-peak precharge).
-  - [x] **UI Journey Screenshots:** HACS installation, Config Flow step-by-step, device card, and integration hub for documentation (`README.md`).
-  - [x] **Final HACS Submission Gate:** 100% green CI (Hassfest, HACS, Ruff, Pytest), brand assets (icon, logo).
-  - [x] **Submit Pull Request:** Open PR on official community repository `hacs/default` ([PR #13790](https://github.com/hacs/default/pull/13790)).
-  - [x] **Public Directory Listing:** Approved and merged into official community repository `hacs/default` by @frenck! 1-click installation available worldwide in Home Assistant.
+- [ ] **Expose Hardcoded Thermodynamic & Safety Parameters to UI (OptionsFlow):**
+  Eliminate all hardcoded magic numbers by making advanced parameters runtime-configurable in `config_flow.py` (`OptionsFlow`) with sensible defaults matching recommended specifications:
+  - [x] `CONF_KALATA_PROCESS_NOISE` ($q_{\text{proc}}$): default `0.005` $(\text{°C/h})^2/\text{h}$, bounds `[0.001, 0.100]`, step `0.001` (Implemented in v0.2.7).
+  - [x] `CONF_OUTDOOR_PRECHARGE_MAX_TEMP`: default `12.0` °C, bounds `[5.0, 20.0]`, step `0.5` (Implemented in v0.2.7).
+  - [x] `CONF_COMFORT_SAFETY_DEFICIT`: default `0.8` °C, bounds `[0.3, 2.5]`, step `0.1` (Implemented in v0.2.7).
+  - [x] `CONF_RULE_B_MIN_THRESHOLD`: default `0.25` °C, bounds `[0.10, 1.00]`, step `0.05` (Implemented in v0.2.7).
+  - [ ] `CONF_SENSOR_STALE_TIMEOUT_MINUTES`: default `90` min, bounds `[30, 360]`, step `15`.
+  - [ ] `CONF_MAX_CONTINUOUS_RUN_MINUTES`: default `120` min (or 0 to disable), bounds `[30, 240]`, step `15`.
+  - [ ] `CONF_THERMAL_RUNAWAY_DERIVATIVE`: default `1.5` °C/h, bounds `[0.5, 3.0]`, step `0.1`.
+  - [ ] `CONF_HARD_OVERSHOOT_MARGIN`: default `1.0` °C, bounds `[0.3, 2.5]`, step `0.1`.
+- [x] **Home Assistant Core 2024.x Modernization (Completed in v0.2.7):**
+  - Replaced deprecated `EVENT_HOMEASSISTANT_START` with `EVENT_HOMEASSISTANT_STARTED`.
+  - Resolved `sw_version` dynamically from `manifest.json` in `device_info` via `INTEGRATION_VERSION` rather than hardcoding static version strings in `climate.py` and `sensor.py`.
+  - Removed dead variable `_heating_start_temp` in `climate.py`.
+- [ ] **Architecture Evolution toward `DataUpdateCoordinator` :**
+  - Refactor entity-to-sensor communication by replacing the overridden `async_write_ha_state()` dispatcher pattern with a native Home Assistant `DataUpdateCoordinator`.
+  - Eliminate the retry busy loop (`asyncio.sleep(0.1)`) in `sensor.py`.
+- [ ] **End-to-End Real Entity Unit Testing :**
+  Migrate unit test suites from standalone mocks toward `pytest-homeassistant-custom-component` to execute FSM transitions, Rule G capping, and dead time calibration directly on the real `DanfossFloorHeatingThermostat` instance.
+
+---
+
+## 5. Long-term Research & Feature Backlog
+
+- [ ] **Inter-Zone Convective Coupling :**
+  Model passive heat transfer drafts between adjacent zones (e.g. warm air draft rising from high-ceiling Living Room to mezzanine/Office).
+- [ ] **Dynamic Multi-Rate & Spot-Market Tariff Schedulers :**
+  Native integration for dynamic hourly pricing (EPEX Spot, NordPool, EDF Tempo 6-color matrix).
