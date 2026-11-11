@@ -56,6 +56,9 @@ DEFAULT_RULE_B_MIN_THRESHOLD = 0.25  # °C
 # Environmental sensors (solar irradiance & wind convective loss)
 CONF_SOLAR_SENSOR = "solar_sensor"
 CONF_WIND_SENSOR = "wind_sensor"
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_USE_WEATHER_FORECAST_AVERAGE = "use_weather_forecast_average"
+DEFAULT_USE_WEATHER_FORECAST_AVERAGE = False
 
 # Compressor mechanical safeties (Danfoss)
 CONF_MIN_CYCLE_DURATION = "min_cycle_duration"
@@ -153,3 +156,7 @@ ATTR_EFFECTIVE_DEAD_TIME_HOURS = "effective_dead_time_hours"
 ATTR_KALATA_PROCESS_NOISE = "kalata_process_noise"
 ATTR_MODEL_ERROR_RMS = "model_error_rms"
 ATTR_RULE_B_THRESHOLD = "rule_b_threshold"
+ATTR_FORECAST_OUTDOOR_TEMP_24H = "forecast_outdoor_temp_24h"
+ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE = "weather_outage_fallback_active"
+ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS = "unserved_quota_carryover_hours"
+MAX_UNSERVED_QUOTA_CARRYOVER_HOURS = 2.0

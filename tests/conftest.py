@@ -2,6 +2,7 @@
 
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -26,6 +27,7 @@ ha_modules = [
     "homeassistant.helpers.selector",
     "homeassistant.helpers.device_registry",
     "homeassistant.helpers.dispatcher",
+    "homeassistant.helpers.update_coordinator",
     "homeassistant.components",
     "homeassistant.components.climate",
     "homeassistant.components.diagnostics",
@@ -100,6 +102,48 @@ class MockSensorEntity(MockEntity):
     """Mock SensorEntity."""
 
 
+class MockDataUpdateCoordinator:
+    """Mock DataUpdateCoordinator."""
+
+    def __class_getitem__(cls, item):
+        return cls
+
+    def __init__(self, hass, logger, name, update_interval=None):
+        self.hass = hass
+        self.logger = logger
+        self.name = name
+        self.update_interval = update_interval
+        self._listeners = []
+        self.data = None
+
+    def async_add_listener(self, update_callback, context=None):
+        self._listeners.append(update_callback)
+        return lambda: self._listeners.remove(update_callback) if update_callback in self._listeners else None
+
+    def async_update_listeners(self):
+        for listener in list(self._listeners):
+            listener()
+
+
+class MockCoordinatorEntity(MockEntity):
+    """Mock CoordinatorEntity."""
+
+    def __class_getitem__(cls, item):
+        return cls
+
+    def __init__(self, coordinator, context=None):
+        super().__init__()
+        self.coordinator = coordinator
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        if hasattr(self.coordinator, "async_add_listener"):
+            self.coordinator.async_add_listener(self._handle_coordinator_update)
+
+    def _handle_coordinator_update(self):
+        self.async_write_ha_state()
+
+
 class MockRestoreEntity(MockEntity):
     """Mock RestoreEntity."""
 
@@ -155,8 +199,18 @@ sensor_mod.SensorStateClass.MEASUREMENT = "measurement"
 
 restore_mod.RestoreEntity = MockRestoreEntity
 
+import homeassistant.helpers.update_coordinator as coord_mod  # noqa: E402
+
+coord_mod.DataUpdateCoordinator = MockDataUpdateCoordinator
+coord_mod.CoordinatorEntity = MockCoordinatorEntity
+
 # Standard Home Assistant constants and types
 import homeassistant.const as ha_const  # noqa: E402
+import homeassistant.util.dt as dt_mock  # noqa: E402
+
+dt_mock.utcnow.side_effect = lambda: datetime.now(UTC)
+dt_mock.now.side_effect = lambda: datetime.now(UTC)
+dt_mock.parse_datetime.side_effect = lambda s: datetime.fromisoformat(s) if isinstance(s, str) else s
 
 ha_const.Platform = MagicMock()
 ha_const.Platform.CLIMATE = "climate"

@@ -39,11 +39,12 @@ All items are ordered from **most critical to least critical**.
     preventing spurious turn-ons triggered by background measurement noise.
   - Aggregated continuous 24h rolling $\text{RMS}(e_{\text{model}})$ and exposed it as an entity attribute (`model_error_rms`, `rule_b_threshold`, `rule_b_min_threshold`) and as a dedicated companion diagnostic entity in `sensor.py`.
   - Configurable `rule_b_min_threshold` baseline floor via `OptionsFlow`.
-- [ ] **Rolling 24h Forecast Weather Average for Daily Thermal Quota :**
-  - Stabilize daily energy quota calculation ($E_{\text{day}}$) by calculating outdoor delta against the rolling 24h average forecast from weather service rather than instantaneous temperature spikes or an inflexible fixed 04:00 AM snapshot.
-  - **Weather Outage Fallback :** In case weather entity is `unavailable`, gracefully fall back to the previous day's quota $+5\%$ or last valid reading with a warning log.
-  - **Unserved Quota Carry-Over :** Carry over unserved duty time to the next cycle/period when heating is temporarily suspended (e.g. by window opening or peak cap).
-  - **Configurable Precharge Sealing Seuil :** Move hardcoded `OUTDOOR_PRECHARGE_MAX_TEMP` (12.0°C) into `OptionsFlow` settings.
+- [x] **Rolling 24h Forecast Weather Average for Daily Thermal Quota (Completed in v0.2.8) :**
+  - Stabilized daily energy quota calculation ($E_{\text{day}}$) by calculating outdoor delta against the rolling 24h average forecast from weather service (`weather.get_forecasts`) rather than instantaneous temperature spikes or an inflexible fixed 04:00 AM snapshot.
+  - **Weather Outage Fallback :** In case weather entity is `unavailable`, gracefully falls back to the previous day's quota $+5\%$ or last valid reading with a warning log.
+  - **Unserved Quota Carry-Over :** Carries over unserved duty time at midnight (capped at 2.0h) to the next day when heating was temporarily suspended (e.g. by window opening or peak cap).
+  - **Configurable Precharge Ceiling Seuil :** Moved hardcoded `OUTDOOR_PRECHARGE_MAX_TEMP` (12.0°C) into `OptionsFlow` settings.
+  - **Config Flow & Options Flow Toggle :** Exposed `weather_entity` selector and `use_weather_forecast_average` toggle in UI.
 
 ---
 
@@ -63,9 +64,9 @@ All items are ordered from **most critical to least critical**.
   - Replaced deprecated `EVENT_HOMEASSISTANT_START` with `EVENT_HOMEASSISTANT_STARTED`.
   - Resolved `sw_version` dynamically from `manifest.json` in `device_info` via `INTEGRATION_VERSION` rather than hardcoding static version strings in `climate.py` and `sensor.py`.
   - Removed dead variable `_heating_start_temp` in `climate.py`.
-- [ ] **Architecture Evolution toward `DataUpdateCoordinator` :**
-  - Refactor entity-to-sensor communication by replacing the overridden `async_write_ha_state()` dispatcher pattern with a native Home Assistant `DataUpdateCoordinator`.
-  - Eliminate the retry busy loop (`asyncio.sleep(0.1)`) in `sensor.py`.
+- [x] **Architecture Evolution toward `DataUpdateCoordinator` (Completed in v0.2.8) :**
+  - Refactored entity-to-sensor communication by replacing the overridden `async_write_ha_state()` dispatcher pattern with a native Home Assistant `DataUpdateCoordinator` (`PwmThermostatCoordinator`).
+  - Completely eliminated the retry busy loop (`asyncio.sleep(0.1)`) in `sensor.py`.
 - [ ] **End-to-End Real Entity Unit Testing :**
   Migrate unit test suites from standalone mocks toward `pytest-homeassistant-custom-component` to execute FSM transitions, Rule G capping, and dead time calibration directly on the real `DanfossFloorHeatingThermostat` instance.
 

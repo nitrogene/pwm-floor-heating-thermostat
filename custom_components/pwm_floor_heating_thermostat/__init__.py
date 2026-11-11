@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+from .coordinator import PwmThermostatCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PWM Floor Heating Thermostat from a config entry (UI)."""
     hass.data.setdefault(DOMAIN, {})
+    coordinator = PwmThermostatCoordinator(hass, entry)
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True

@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .coordinator import PwmThermostatCoordinator
 
 TO_REDACT: list[str] = []
 
@@ -32,6 +33,8 @@ async def async_get_config_entry_diagnostics(
     # Retrieve live thermostat state if registered
     thermostats = hass.data.get(DOMAIN, {})
     thermostat = thermostats.get(entry.entry_id)
+    if isinstance(thermostat, PwmThermostatCoordinator) and thermostat.thermostat is not None:
+        thermostat = thermostat.thermostat
 
     if thermostat:
         hours_needed = getattr(thermostat, "_hours_needed_24h", 0.0)
@@ -81,6 +84,11 @@ async def async_get_config_entry_diagnostics(
             "dry_run": getattr(thermostat, "_dry_run", None),
             "simulated_heater_state": getattr(thermostat, "_simulated_heater_state", None),
             "stagger_delay_sec": stagger_sec,
+            "weather_entity": getattr(thermostat, "_weather_entity", None),
+            "use_weather_forecast_average": getattr(thermostat, "_use_weather_forecast_average", None),
+            "forecast_outdoor_temp_24h": getattr(thermostat, "_forecast_outdoor_temp_24h", None),
+            "weather_outage_fallback_active": getattr(thermostat, "_weather_outage_fallback_active", None),
+            "unserved_quota_carryover_hours": getattr(thermostat, "_unserved_quota_carryover_hours", None),
             "peak_max_run_duration_min": peak_dur_min,
             "compressor_cycles_today": getattr(thermostat, "_cycles_today", None),
             "max_cycles_budget": getattr(thermostat, "_max_cycles", None),

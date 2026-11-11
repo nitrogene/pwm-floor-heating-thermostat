@@ -20,7 +20,9 @@
           "solar_sensor": "Solar Irradiance / Illuminance Sensor",
           "wind_sensor": "Wind Speed Sensor",
           "auto_calibrate_heat_loss": "Mode B Auto-Adaptation of Heat Loss H",
-          "auto_calibrate_dead_time": "Mode B Auto-Adaptation of Dead Time Theta"
+          "auto_calibrate_dead_time": "Mode B Auto-Adaptation of Dead Time Theta",
+          "weather_entity": "Weather Service Entity (for 24h rolling forecast)",
+          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota"
         }
       }
     },
@@ -63,7 +65,9 @@
           "kalata_process_noise": "Kalata Filter Process Noise q_proc ((°C/h)²/h)",
           "outdoor_precharge_max_temp": "Outdoor Precharge Max Temperature (°C)",
           "comfort_safety_deficit": "Comfort Safety Deficit Threshold (°C)",
-          "rule_b_min_threshold": "Rule B Minimum Anticipation Threshold (°C)"
+          "rule_b_min_threshold": "Rule B Minimum Anticipation Threshold (°C)",
+          "weather_entity": "Weather Service Entity",
+          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota"
         }
       }
     }

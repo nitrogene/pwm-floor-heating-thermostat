@@ -43,6 +43,8 @@ from .const import (
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
+    CONF_USE_WEATHER_FORECAST_AVERAGE,
+    CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_SENSOR,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_POWER_WATTS,
     DEFAULT_RULE_B_MIN_THRESHOLD,
     DEFAULT_SLAB_TAU_HOURS,
+    DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
     DOMAIN,
 )
@@ -173,6 +176,13 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_AUTO_CALIBRATE_DEAD_TIME,
                     default=DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
+                ): selector.BooleanSelector(),
+                vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["weather"])
+                ),
+                vol.Optional(
+                    CONF_USE_WEATHER_FORECAST_AVERAGE,
+                    default=DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
                 ): selector.BooleanSelector(),
             }
         )
@@ -480,6 +490,21 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(
+                    CONF_WEATHER_ENTITY,
+                    description={"suggested_value": curr.get(CONF_WEATHER_ENTITY)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["weather"])
+                ),
+                vol.Required(
+                    CONF_USE_WEATHER_FORECAST_AVERAGE,
+                    default=bool(
+                        curr.get(
+                            CONF_USE_WEATHER_FORECAST_AVERAGE,
+                            DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
+                        )
+                    ),
+                ): selector.BooleanSelector(),
             }
         )
 

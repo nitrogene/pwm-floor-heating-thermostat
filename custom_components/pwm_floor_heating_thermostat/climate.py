@@ -64,10 +64,13 @@ from .const import (
     ATTR_DEAD_TIME_SAMPLES_COUNT,
     ATTR_EFFECTIVE_DEAD_TIME_HOURS,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
+    ATTR_FORECAST_OUTDOOR_TEMP_24H,
     ATTR_KALATA_PROCESS_NOISE,
     ATTR_MODEL_ERROR_RMS,
     ATTR_RULE_B_THRESHOLD,
     ATTR_SOLAR_CREDIT_KWH,
+    ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS,
+    ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE,
     ATTR_WIND_FACTOR,
     ATTR_WIND_SPEED,
     AUTO_CALIBRATE_MAX_DEVIATION,
@@ -103,6 +106,8 @@ from .const import (
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
+    CONF_USE_WEATHER_FORECAST_AVERAGE,
+    CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_DETECTION_SENSOR,
@@ -136,6 +141,7 @@ from .const import (
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_STAGGER_DELAY,
     DEFAULT_TARGET_TEMP,
+    DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
     DEFAULT_WINDOW_DROP_THRESHOLD,
     DEFAULT_WINDOW_TIMEOUT,
@@ -145,6 +151,7 @@ from .const import (
     FSM_RUNNING_NORMAL,
     FSM_WAITING_MIN_OFF,
     INTEGRATION_VERSION,
+    MAX_UNSERVED_QUOTA_CARRYOVER_HOURS,
     POST_AIRING_MAX_DERIVATIVE,
     POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
@@ -212,6 +219,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(
             CONF_RULE_B_MIN_THRESHOLD, default=DEFAULT_RULE_B_MIN_THRESHOLD
         ): vol.Coerce(float),
+        vol.Optional(CONF_WEATHER_ENTITY): cv.entity_id,
+        vol.Optional(
+            CONF_USE_WEATHER_FORECAST_AVERAGE, default=DEFAULT_USE_WEATHER_FORECAST_AVERAGE
+        ): cv.boolean,
     }
 )
 
@@ -255,8 +266,12 @@ async def async_setup_entry(
     config[CONF_UNIQUE_ID] = entry.entry_id
     if CONF_NAME not in config:
         config[CONF_NAME] = entry.title
-    entity = PwmFloorHeatingThermostat(hass, config, entry=entry)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entity
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    entity = PwmFloorHeatingThermostat(hass, config, entry=entry, coordinator=coordinator)
+    if coordinator and hasattr(coordinator, "register_thermostat"):
+        coordinator.register_thermostat(entity)
+    else:
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entity
     async_add_entities([entity])
 
 
@@ -276,10 +291,17 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     _attr_min_temp = DEFAULT_MIN_TEMP
     _attr_max_temp = DEFAULT_MAX_TEMP
 
-    def __init__(self, hass: HomeAssistant, config: ConfigType, entry: ConfigEntry | None = None) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: ConfigType,
+        entry: ConfigEntry | None = None,
+        coordinator: Any | None = None,
+    ) -> None:
         """Initialize the thermostat entity."""
         self.hass = hass
         self._entry = entry
+        self._coordinator = coordinator
         self._name = config.get(CONF_NAME, DEFAULT_NAME)
         self._unique_id = config.get(CONF_UNIQUE_ID)
         self._heater_entity = config.get(CONF_HEATER)
@@ -288,6 +310,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._off_peak_sensor = config.get(CONF_OFF_PEAK_SENSOR) or config.get(CONF_HEURES_CREUSES_SENSOR)
         self._dry_run = bool(config.get(CONF_DRY_RUN, DEFAULT_DRY_RUN))
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
+        self._weather_entity = config.get(CONF_WEATHER_ENTITY)
+        self._use_weather_forecast_average = bool(
+            config.get(CONF_USE_WEATHER_FORECAST_AVERAGE, DEFAULT_USE_WEATHER_FORECAST_AVERAGE)
+        )
+        self._forecast_outdoor_temp_24h: float | None = None
+        self._weather_outage_fallback_active: bool = False
+        self._unserved_quota_carryover_hours: float = 0.0
+        self._prev_day_energy_quota_kwh: float | None = None
 
         # Floor slab / hydronic loop sensor
         self._floor_temp_sensor = config.get(CONF_FLOOR_TEMP_SENSOR)
@@ -492,6 +522,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._comfort_temp = float(old_comfort)
                 except (ValueError, TypeError):
                     pass
+            if "unserved_quota_carryover_hours" in old_attrs and old_attrs["unserved_quota_carryover_hours"] is not None:
+                try:
+                    self._unserved_quota_carryover_hours = float(old_attrs["unserved_quota_carryover_hours"])
+                except (ValueError, TypeError):
+                    pass
+            if "energy_quota_24h_kwh" in old_attrs and old_attrs["energy_quota_24h_kwh"] is not None:
+                try:
+                    self._prev_day_energy_quota_kwh = float(old_attrs["energy_quota_24h_kwh"])
+                except (ValueError, TypeError):
+                    pass
 
         # Track state changes
         self.async_on_remove(
@@ -560,6 +600,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self._weather_entity:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._weather_entity], self._async_weather_entity_changed
+                )
+            )
+
         # Periodic control loop (every minute)
         self.async_on_remove(
             async_track_time_interval(
@@ -605,7 +652,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     def async_write_ha_state(self) -> None:
         """Write state and dispatch update signal to companion sensors."""
         super().async_write_ha_state()
-        if self._entry and hasattr(self, "hass") and self.hass:
+        if self._coordinator:
+            self._coordinator.async_notify_update()
+        elif self._entry and hasattr(self, "hass") and self.hass:
             async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
 
     @property
@@ -748,6 +797,15 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "min_off_lock_remaining_sec": min_off_rem,
             "off_peak_active": off_peak_active,
             "heures_creuses_active": off_peak_active,
+            CONF_WEATHER_ENTITY: self._weather_entity,
+            CONF_USE_WEATHER_FORECAST_AVERAGE: self._use_weather_forecast_average,
+            ATTR_FORECAST_OUTDOOR_TEMP_24H: (
+                round(self._forecast_outdoor_temp_24h, 2)
+                if self._forecast_outdoor_temp_24h is not None
+                else None
+            ),
+            ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE: self._weather_outage_fallback_active,
+            ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS: round(self._unserved_quota_carryover_hours, 2),
         }
 
     async def async_set_temperature(self, **kwargs) -> None:
@@ -873,6 +931,73 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     def _async_wind_sensor_changed(self, event: Any) -> None:
         """Handle wind speed sensor state change."""
         self.async_write_ha_state()
+
+    @callback
+    def _async_weather_entity_changed(self, event: Any) -> None:
+        """Handle weather entity state change and trigger regulation cycle."""
+        self.hass.async_create_task(self._async_control_heating())
+
+    async def _async_get_weather_forecast_24h_average(self) -> float | None:
+        """Fetch rolling 24-hour hourly forecast average from weather service."""
+        if not self._weather_entity:
+            return None
+        st_weather = self.hass.states.get(self._weather_entity)
+        if not st_weather or st_weather.state in ["unknown", "unavailable"]:
+            _LOGGER.warning(
+                "Weather entity %s is %s; cannot compute 24h forecast average",
+                self._weather_entity,
+                st_weather.state if st_weather else "missing",
+            )
+            return None
+
+        forecast_list: list[dict[str, Any]] = []
+        if self.hass.services.has_service("weather", "get_forecasts"):
+            try:
+                response = await self.hass.services.async_call(
+                    "weather",
+                    "get_forecasts",
+                    {"entity_id": self._weather_entity, "type": "hourly"},
+                    blocking=True,
+                    return_response=True,
+                )
+                if response and self._weather_entity in response:
+                    forecast_list = response[self._weather_entity].get("forecast") or []
+            except Exception as err:
+                _LOGGER.debug("weather.get_forecasts call failed: %s", err)
+
+        if not forecast_list and "forecast" in st_weather.attributes:
+            forecast_list = st_weather.attributes.get("forecast") or []
+
+        if not forecast_list:
+            return None
+
+        temps: list[float] = []
+        now_dt = dt_util.now()
+        horizon_dt = now_dt + timedelta(hours=24)
+
+        for entry in forecast_list:
+            if "temperature" not in entry or entry["temperature"] is None:
+                continue
+            entry_time = entry.get("datetime")
+            if entry_time is not None:
+                parsed_time = dt_util.parse_datetime(str(entry_time))
+                if parsed_time is not None:
+                    if parsed_time < now_dt - timedelta(hours=1) or parsed_time > horizon_dt:
+                        continue
+            temps.append(float(entry["temperature"]))
+            if len(temps) >= 24:
+                break
+
+        if not temps:
+            temps = [
+                float(e["temperature"])
+                for e in forecast_list[:24]
+                if "temperature" in e and e["temperature"] is not None
+            ]
+
+        if temps:
+            return round(sum(temps) / len(temps), 2)
+        return None
 
     @property
     def _total_heating_hours_today(self) -> float:
@@ -1095,10 +1220,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Midnight daily counter reset (evaluated unconditionally regardless of mode)
         today = dt_util.now().date()
         if today != self._last_day_reset:
+            unserved_hours = max(0.0, self._hours_needed_24h - self._total_heating_hours_today)
+            self._unserved_quota_carryover_hours = round(
+                min(MAX_UNSERVED_QUOTA_CARRYOVER_HOURS, unserved_hours), 2
+            )
+            self._prev_day_energy_quota_kwh = self._energy_needed_kwh
             self._hours_run_today = 0.0
             self._cycles_today = 0
             self._last_day_reset = today
-            _LOGGER.info("Midnight daily counters reset for %s", self.name)
+            _LOGGER.info(
+                "Midnight daily counters reset for %s (carryover: %.2fh, saved prev quota: %.2f kWh)",
+                self.name,
+                self._unserved_quota_carryover_hours,
+                self._prev_day_energy_quota_kwh or 0.0,
+            )
 
         if self._hvac_mode == HVACMode.OFF:
             # If compressor is in running state, ensure safe shutdown once min cycle is fulfilled
@@ -1173,9 +1308,37 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
-        # 7. Calculate 24h thermal energy quota (kWh) with Wind & Slow Drift Ambient Supervisor
-        if self._outdoor_temp is not None:
-            delta_t = max(0.0, self._target_temp - self._outdoor_temp)
+        # 7. Calculate 24h thermal energy quota (kWh) with Wind, Rolling Weather Forecast & Slow Drift Ambient Supervisor
+        effective_outdoor: float | None = self._outdoor_temp
+        self._forecast_outdoor_temp_24h = None
+        self._weather_outage_fallback_active = False
+        weather_fallback_quota_kwh: float | None = None
+
+        if self._use_weather_forecast_average and self._weather_entity:
+            forecast_avg = await self._async_get_weather_forecast_24h_average()
+            if forecast_avg is not None:
+                effective_outdoor = forecast_avg
+                self._forecast_outdoor_temp_24h = forecast_avg
+            else:
+                self._weather_outage_fallback_active = True
+                if self._prev_day_energy_quota_kwh is not None and self._prev_day_energy_quota_kwh > 0.0:
+                    weather_fallback_quota_kwh = round(self._prev_day_energy_quota_kwh * 1.05, 2)
+                    _LOGGER.warning(
+                        "Weather forecast unavailable for %s; falling back to previous day's quota +5%% (%.2f kWh)",
+                        self.name,
+                        weather_fallback_quota_kwh,
+                    )
+
+        if weather_fallback_quota_kwh is not None:
+            base_energy_kwh = weather_fallback_quota_kwh
+            trimmed_energy_kwh = base_energy_kwh
+            self._energy_needed_kwh = base_energy_kwh
+            self._hours_needed_24h = round(
+                (self._energy_needed_kwh * 1000.0) / self._power_watts + self._unserved_quota_carryover_hours,
+                2,
+            )
+        elif effective_outdoor is not None:
+            delta_t = max(0.0, self._target_temp - effective_outdoor)
             base_energy_kwh = (
                 self._effective_heat_loss * self._wind_factor * delta_t * 24.0
             ) / 1000.0
@@ -1220,8 +1383,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                             pass
 
             self._energy_needed_kwh = max(0.0, round(trimmed_energy_kwh - self._solar_credit_kwh, 2))
-            # Required compressor operating hours over 24h
-            self._hours_needed_24h = (self._energy_needed_kwh * 1000.0) / self._power_watts
+            # Required compressor operating hours over 24h + unserved carry-over
+            self._hours_needed_24h = round(
+                (self._energy_needed_kwh * 1000.0) / self._power_watts + self._unserved_quota_carryover_hours,
+                2,
+            )
 
         # 5. Model-based predictive scheduling strategy
         should_heat = False

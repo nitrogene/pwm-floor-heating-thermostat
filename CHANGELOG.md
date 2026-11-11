@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.8] - 2026-11-11
+
+### Added
+- **Rolling 24h Forecast Weather Average for Daily Thermal Quota**:
+  - Added optional `weather_entity` selector and `use_weather_forecast_average` toggle in both Config Flow and Options Flow.
+  - Resolves rolling 24-hour hourly forecast average from the weather service (calling `weather.get_forecasts` with fallback to state attributes) to stabilize the daily thermal energy quota ($E_{\text{day}}$) against instantaneous temperature fluctuations.
+  - Exposed `forecast_outdoor_temp_24h` and `use_weather_forecast_average` telemetry attributes on the climate entity and diagnostics dump.
+- **Weather Outage Graceful Fallback**:
+  - Automatic and resilient fallback when the configured weather entity is unavailable or fails: automatically falls back to the previous day's calculated quota +5% (with explicit warning log) or to the instantaneous outdoor temperature sensor.
+  - Exposed `weather_outage_fallback_active` telemetry attribute.
+- **Unserved Quota Carry-Over**:
+  - Automatic carry-over of unserved duty time at midnight (up to 2.0 hours maximum) into `unserved_quota_carryover_hours` to ensure slab thermal deficit is not discarded when heating was suspended (e.g., prolonged window opening or peak cap).
+  - Exposed `unserved_quota_carryover_hours` telemetry attribute on the climate entity and diagnostics.
+- **Native `PwmThermostatCoordinator` Architecture (`DataUpdateCoordinator`)**:
+  - Introduced `PwmThermostatCoordinator` in `coordinator.py` orchestrating state synchronization between the master climate entity and companion diagnostic sensors.
+  - Completely eradicated the startup busy-wait retry loop (`asyncio.sleep(0.1)`) and dispatcher signals in `sensor.py`.
+  - Migrated `PwmDiagnosticSensor` to native `CoordinatorEntity[PwmThermostatCoordinator]` conforming strictly to Home Assistant Core architectural guidelines.
+
+### Changed
+- Replaced dispatcher event listeners on companion sensors with native coordinator push notifications.
+- Diagnostics dump (`async_get_config_entry_diagnostics`) updated to support the coordinator pattern and export all new forecast and carry-over attributes.
+
+---
+
 ## [0.2.7] - 2026-11-10
 
 ### Added

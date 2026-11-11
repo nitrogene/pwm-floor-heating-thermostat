@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,8 +22,8 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
@@ -34,6 +33,7 @@ from .const import (
     FSM_WAITING_MIN_OFF,
     INTEGRATION_VERSION,
 )
+from .coordinator import PwmThermostatCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -132,27 +132,26 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up diagnostic sensors for a PWM thermostat entry."""
-    thermostat = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if not thermostat:
-        # Brief retry loop awaiting climate platform instantiation in case of concurrency
-        for _ in range(20):
-            await asyncio.sleep(0.1)
-            thermostat = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-            if thermostat:
-                break
-
-    if not thermostat:
-        _LOGGER.warning("Thermostat not found in hass.data for entry %s", entry.entry_id)
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not data:
+        _LOGGER.warning("Coordinator not found in hass.data for entry %s", entry.entry_id)
         return
 
+    if isinstance(data, PwmThermostatCoordinator):
+        coordinator = data
+    else:
+        # Wrap legacy thermostat mock into coordinator for compatibility
+        coordinator = PwmThermostatCoordinator(hass, entry)
+        coordinator.register_thermostat(data)
+
     entities = [
-        PwmDiagnosticSensor(thermostat, description, entry)
+        PwmDiagnosticSensor(coordinator, description, entry)
         for description in SENSOR_TYPES
     ]
     async_add_entities(entities)
 
 
-class PwmDiagnosticSensor(SensorEntity):
+class PwmDiagnosticSensor(CoordinatorEntity[PwmThermostatCoordinator], SensorEntity):
     """Diagnostic companion sensor for PWM thermostat."""
 
     _attr_has_entity_name = True
@@ -160,12 +159,12 @@ class PwmDiagnosticSensor(SensorEntity):
 
     def __init__(
         self,
-        thermostat: Any,
+        coordinator: PwmThermostatCoordinator,
         description: PwmSensorEntityDescription,
         entry: ConfigEntry,
     ) -> None:
         """Initialize the companion sensor."""
-        self._thermostat = thermostat
+        super().__init__(coordinator)
         self.entity_description = description
         self._entry = entry
         self._unique_id = f"{entry.entry_id}_{description.key}"
@@ -174,7 +173,10 @@ class PwmDiagnosticSensor(SensorEntity):
     @property
     def native_value(self) -> Any:
         """Return native value computed from master thermostat."""
-        return self.entity_description.value_fn(self._thermostat)
+        t = self.coordinator.thermostat
+        if t is None:
+            return None
+        return self.entity_description.value_fn(t)
 
     @property
     def device_info(self) -> DeviceInfo | None:
@@ -185,17 +187,6 @@ class PwmDiagnosticSensor(SensorEntity):
             manufacturer="Nitrogene",
             model="PWM Thermodynamic Underfloor Thermostat",
             sw_version=INTEGRATION_VERSION,
-        )
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to update notifications from the master thermostat."""
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass,
-                f"{DOMAIN}_{self._entry.entry_id}_update",
-                self._handle_thermostat_update,
-            )
         )
 
     @callback
