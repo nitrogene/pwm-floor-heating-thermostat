@@ -65,6 +65,7 @@ from .const import (
     ATTR_EFFECTIVE_DEAD_TIME_HOURS,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
     ATTR_FORECAST_OUTDOOR_TEMP_24H,
+    ATTR_HEAT_LOSS_CONFIDENCE_SAMPLES,
     ATTR_KALATA_PROCESS_NOISE,
     ATTR_MODEL_ERROR_RMS,
     ATTR_RULE_B_THRESHOLD,
@@ -87,6 +88,7 @@ from .const import (
     CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HEAT_LOSS,
+    CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
     CONF_HEATER,
     CONF_HEURES_CREUSES_SENSOR,
     CONF_KALATA_PROCESS_NOISE,
@@ -125,6 +127,7 @@ from .const import (
     DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HEAT_LOSS,
+    DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
     DEFAULT_KALATA_PROCESS_NOISE,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
@@ -152,6 +155,7 @@ from .const import (
     FSM_WAITING_MIN_OFF,
     INTEGRATION_VERSION,
     MAX_UNSERVED_QUOTA_CARRYOVER_HOURS,
+    MIN_HEAT_LOSS_WK,
     POST_AIRING_MAX_DERIVATIVE,
     POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
@@ -201,6 +205,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(
             CONF_AUTO_CALIBRATE_HEAT_LOSS, default=DEFAULT_AUTO_CALIBRATE_HEAT_LOSS
         ): cv.boolean,
+        vol.Optional(
+            CONF_HEAT_LOSS_CONFIDENCE_SAMPLES, default=DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES
+        ): cv.positive_int,
         vol.Optional(
             CONF_AUTO_CALIBRATE_DEAD_TIME, default=DEFAULT_AUTO_CALIBRATE_DEAD_TIME
         ): cv.boolean,
@@ -360,6 +367,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Mode B soft self-adaptation of heat loss H
         self._auto_calibrate_heat_loss = bool(
             config.get(CONF_AUTO_CALIBRATE_HEAT_LOSS, DEFAULT_AUTO_CALIBRATE_HEAT_LOSS)
+        )
+        self._heat_loss_confidence_samples: int = int(
+            config.get(
+                CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
+                DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
+            )
         )
         self._effective_heat_loss: float = self._heat_loss
 
@@ -770,6 +783,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "heat_loss_factor_wk": self._heat_loss,
             ATTR_EFFECTIVE_HEAT_LOSS_WK: self._effective_heat_loss,
             "auto_calibrate_heat_loss": self._auto_calibrate_heat_loss,
+            ATTR_HEAT_LOSS_CONFIDENCE_SAMPLES: self._heat_loss_confidence_samples,
             ATTR_WIND_FACTOR: self._wind_factor,
             ATTR_WIND_SPEED: self._wind_speed,
             "compressor_power_watts": self._power_watts,
@@ -1276,11 +1290,18 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             and self._heat_loss_measured_wk is not None
             and self._heat_loss_samples_count >= AUTO_CALIBRATE_MIN_SAMPLES
         ):
-            min_h = round((1.0 - AUTO_CALIBRATE_MAX_DEVIATION) * self._heat_loss, 1)
-            max_h = round((1.0 + AUTO_CALIBRATE_MAX_DEVIATION) * self._heat_loss, 1)
-            self._effective_heat_loss = round(
-                max(min_h, min(max_h, self._heat_loss_measured_wk)), 1
-            )
+            if self._heat_loss_samples_count >= self._heat_loss_confidence_samples:
+                # Direct unconstrained application once statistical confidence is reached
+                self._effective_heat_loss = round(
+                    max(MIN_HEAT_LOSS_WK, self._heat_loss_measured_wk), 1
+                )
+            else:
+                # Soft progressive adaptation (clamped within +/-20% of baseline)
+                min_h = round((1.0 - AUTO_CALIBRATE_MAX_DEVIATION) * self._heat_loss, 1)
+                max_h = round((1.0 + AUTO_CALIBRATE_MAX_DEVIATION) * self._heat_loss, 1)
+                self._effective_heat_loss = round(
+                    max(min_h, min(max_h, self._heat_loss_measured_wk)), 1
+                )
 
         # 5. Wind convective heat loss amplification
         self._wind_factor = 1.0

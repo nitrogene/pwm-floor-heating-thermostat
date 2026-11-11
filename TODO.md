@@ -67,8 +67,8 @@ All items are ordered from **most critical to least critical**.
 - [x] **Architecture Evolution toward `DataUpdateCoordinator` (Completed in v0.2.8) :**
   - Refactored entity-to-sensor communication by replacing the overridden `async_write_ha_state()` dispatcher pattern with a native Home Assistant `DataUpdateCoordinator` (`PwmThermostatCoordinator`).
   - Completely eliminated the retry busy loop (`asyncio.sleep(0.1)`) in `sensor.py`.
-- [ ] **End-to-End Real Entity Unit Testing :**
-  Migrate unit test suites from standalone mocks toward `pytest-homeassistant-custom-component` to execute FSM transitions, Rule G capping, and dead time calibration directly on the real `DanfossFloorHeatingThermostat` instance.
+- [x] **End-to-End Real Entity Unit Testing (Completed in v0.2.9) :**
+  Implemented real entity unit test suite (`tests/test_real_entity_e2e.py`) executing Danfoss FSM transitions (30 min minimum run lock, 15 min minimum off lock), DTU 65.14 slab water loop safeties, Rule G peak-hour capping, and Mode A/B unconstrained adaptation directly on the real `PwmFloorHeatingThermostat` instance with time warping.
 
 ---
 

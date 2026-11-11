@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.9] - 2026-11-11
+
+### Added
+- **Two-Stage Mode B Self-Adaptation with Configurable Confidence Threshold**:
+  - Introduced configurable `heat_loss_confidence_samples` (default: 10 samples) in both Config Flow and Options Flow.
+  - Automatically transitions Mode B adaptation between two thermodynamic stages:
+    1. **Stage 1 (Initial ramp-up, 3 <= N < threshold)**: Clamps effective heat loss within +/- 20% of baseline to protect against erratic early measurements.
+    2. **Stage 2 (Full statistical confidence, N >= threshold)**: Releases the baseline safety clamp, applying 100% of the measured heat loss ($H_{\text{eff}} = H_{\text{measured}}$) directly with an absolute physical lower bound guard ($H \ge 0.5\text{ W/K}$).
+  - Exposed `heat_loss_confidence_samples` attribute in `extra_state_attributes` and diagnostics export.
+- **End-to-End Real Entity Unit Testing Suite**:
+  - Implemented comprehensive end-to-end unit test suite in `tests/test_real_entity_e2e.py` operating directly on the live `PwmFloorHeatingThermostat` entity rather than isolated standalone simulator functions.
+  - Validates Danfoss FSM transitions under time warping (mandatory 30 min oil return runtime lock and 15 min pressure equalization off-cycle lock).
+  - Validates Rule G peak-hour run duration capping, DTU 65.14 slab water loop safeguards (max 28.0°C cutoff, freeze protection), and Mode B unconstrained adaptation on the real entity.
+
+### Changed
+- **Config Flow & Options Flow Heat Loss Lower Bound and Precision**:
+  - Lowered minimum allowable heat loss coefficient `min` from 5.0 W/K to **1.0 W/K** in both Config Flow and Options Flow schemas, resolving validation errors on small, well-insulated, or passive rooms (e.g. offices, small bedrooms).
+  - Refined selector step from 0.5 W/K to **0.1 W/K** for granular thermodynamic tuning.
+- **Form Terminology Disambiguation**:
+  - Renamed ambiguous "Heat Loss Coefficient H" to **"Baseline / Initial Heat Loss Coefficient H (W/K)"** (in French: **"Déperditions de référence (valeur initiale) H (W/K)"**), clearly establishing the distinction between baseline reference, measured passive loss (Mode A), and effective applied coefficient.
+
+### Fixed
+- Fixed `Value X is too small` validation error in Home Assistant UI when entering heat loss values below 5.0 W/K (e.g. 3.0 W/K).
+
+---
+
 ## [0.2.8] - 2026-11-11
 
 ### Added

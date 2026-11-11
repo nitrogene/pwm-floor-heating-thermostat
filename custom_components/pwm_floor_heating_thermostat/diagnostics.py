@@ -66,6 +66,7 @@ async def async_get_config_entry_diagnostics(
             "heat_loss_factor_wk": getattr(thermostat, "_heat_loss", None),
             "effective_heat_loss_wk": getattr(thermostat, "_effective_heat_loss", None),
             "auto_calibrate_heat_loss": getattr(thermostat, "_auto_calibrate_heat_loss", None),
+            "heat_loss_confidence_samples": getattr(thermostat, "_heat_loss_confidence_samples", None),
             "wind_factor": getattr(thermostat, "_wind_factor", None),
             "wind_speed": getattr(thermostat, "_wind_speed", None),
             "compressor_power_watts": getattr(thermostat, "_power_watts", None),

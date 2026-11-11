@@ -2,7 +2,7 @@
 
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -250,6 +250,27 @@ selector.NumberSelectorMode.BOX = "box"
 selector.NumberSelectorMode.SLIDER = "slider"
 selector.BooleanSelector = MockSelector
 selector.TextSelector = MockSelector
+
+# Config validation mock
+import homeassistant.helpers.config_validation as cv_mock  # noqa: E402
+
+
+def mock_time_period(val):
+    """Mock Home Assistant cv.time_period."""
+    if isinstance(val, timedelta):
+        return val
+    if isinstance(val, str):
+        parts = val.split(":")
+        if len(parts) == 3:
+            return timedelta(hours=int(parts[0]), minutes=int(parts[1]), seconds=int(parts[2]))
+        if len(parts) == 2:
+            return timedelta(minutes=int(parts[0]), seconds=int(parts[1]))
+    if isinstance(val, (int, float)):
+        return timedelta(seconds=val)
+    return timedelta(seconds=0)
+
+
+cv_mock.time_period.side_effect = mock_time_period
 
 # Device Registry
 import homeassistant.helpers.device_registry as dr  # noqa: E402

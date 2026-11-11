@@ -42,6 +42,9 @@ CONF_SLAB_TIME_CONSTANT = "slab_tau_hours"  # Slab thermal inertia time constant
 CONF_DEAD_TIME = "dead_time_hours"      # Pure slab transport dead time (hours)
 CONF_AUTO_CALIBRATE_HEAT_LOSS = "auto_calibrate_heat_loss"  # Mode B soft self-adaptation of heat loss
 DEFAULT_AUTO_CALIBRATE_HEAT_LOSS = False
+CONF_HEAT_LOSS_CONFIDENCE_SAMPLES = "heat_loss_confidence_samples"  # Min samples count for unconstrained direct application
+DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES = 10  # Samples count above which measured heat loss is applied unconstrained
+MIN_HEAT_LOSS_WK = 0.5  # Physical lower bound for heat loss coefficient (W/K)
 CONF_AUTO_CALIBRATE_DEAD_TIME = "auto_calibrate_dead_time"  # Soft self-adaptation of dead time theta
 DEFAULT_AUTO_CALIBRATE_DEAD_TIME = False
 CONF_KALATA_PROCESS_NOISE = "kalata_process_noise"  # Continuous Kalata process acceleration noise (q_proc)
@@ -130,6 +133,7 @@ ATTR_COUNTERS_DATE = "counters_date"
 ATTR_AMBIENT_TRIM_RATIO = "ambient_trim_ratio"
 ATTR_SOLAR_CREDIT_KWH = "solar_credit_kwh"
 ATTR_EFFECTIVE_HEAT_LOSS_WK = "effective_heat_loss_wk"
+ATTR_HEAT_LOSS_CONFIDENCE_SAMPLES = "heat_loss_confidence_samples"
 
 # Ambient supervisor and solar parameters
 AMBIENT_TRIM_MIN = 0.80                         # Max 20% quota reduction on warm rooms

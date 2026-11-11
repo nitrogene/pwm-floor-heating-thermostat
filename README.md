@@ -66,7 +66,11 @@ The slab acts as a physical low-pass thermal filter. The outdoor temperature tha
 
 ## Key Features
 
-- 🏗️ **Thermodynamic Slab Model**: Predicts the daily heat deficit based on outdoor temperature (current and forecast) and house heat loss (H in W/K).
+- 🏗️ **Thermodynamic Slab Model**: Predicts the daily heat deficit based on outdoor temperature (current and forecast) and room heat loss ($H$ in W/K, configurable down to 1.0 W/K with 0.1 W/K granularity).
+- 🧠 **Mode B Two-Stage Self-Adaptation**: Unifies three heat loss representations:
+  - **Baseline / Initial $H$**: Configured reference value used at startup.
+  - **Measured $U \cdot A$ (Mode A)**: Empirically estimated from unheated night decay slopes.
+  - **Effective $H_{\text{eff}}$**: Injected into the daily energy quota equation. Automatically shifts from a $\pm 20\%$ safety clamp (initial ramp-up $3 \le N < N_{\text{confidence}}$) to **direct unconstrained application** ($N \ge N_{\text{confidence}}$, configurable default: 10 samples), letting real-world physics prevail.
 - ⏱️ **Predictive Dead-Time Anticipation**: Projects the slab's internal thermal wave to prevent cold morning drops without overshooting.
 - 🛡️ **Danfoss Compressor Safety Guard**: Built-in, non-bypassable FSM:
   - Minimum ON cycle: 30 minutes (ensures complete oil return).
@@ -112,7 +116,7 @@ Setting up your thermostat is fully supported directly in the Home Assistant UI 
 | :---: | :---: |
 | ![Config Flow Step 1](images/config_flow_step1.png) | ![Config Flow Filled Step 1](images/config_flow_filled_step1.png) |
 
-4. **Step 2 - Thermodynamic Parameters:** Enter the heat loss coefficient $H$, heating output $P$, slab time constant $\tau$, and dead time $\theta$:
+4. **Step 2 - Thermodynamic Parameters:** Enter the baseline / initial heat loss coefficient $H$ (range: 1.0 to 300.0 W/K, step: 0.1 W/K), heating output $P$, slab time constant $\tau$, and dead time $\theta$:
 
 | Parameters Form | Configured Parameters |
 | :---: | :---: |

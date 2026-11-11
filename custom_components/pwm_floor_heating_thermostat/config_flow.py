@@ -28,6 +28,7 @@ from .const import (
     CONF_ENFORCE_DAILY_QUOTA,
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HEAT_LOSS,
+    CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
     CONF_HEATER,
     CONF_KALATA_PROCESS_NOISE,
     CONF_MAX_FLOOR_TEMP,
@@ -57,6 +58,7 @@ from .const import (
     DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HEAT_LOSS,
+    DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
     DEFAULT_KALATA_PROCESS_NOISE,
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MIN_FLOOR_TEMP,
@@ -126,9 +128,9 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(CONF_HEAT_LOSS, default=DEFAULT_HEAT_LOSS): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=5.0,
+                        min=1.0,
                         max=300.0,
-                        step=0.5,
+                        step=0.1,
                         unit_of_measurement="W/K",
                         mode=selector.NumberSelectorMode.BOX,
                     )
@@ -173,6 +175,18 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_AUTO_CALIBRATE_HEAT_LOSS,
                     default=DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
+                    default=DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3,
+                        max=100,
+                        step=1,
+                        unit_of_measurement="samples",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
                 vol.Optional(
                     CONF_AUTO_CALIBRATE_DEAD_TIME,
                     default=DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
@@ -249,9 +263,9 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     default=float(curr.get(CONF_HEAT_LOSS, DEFAULT_HEAT_LOSS)),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=5.0,
+                        min=1.0,
                         max=300.0,
-                        step=0.5,
+                        step=0.1,
                         unit_of_measurement="W/K",
                         mode=selector.NumberSelectorMode.BOX,
                     )
@@ -397,6 +411,23 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         )
                     ),
                 ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
+                    default=int(
+                        curr.get(
+                            CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
+                            DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3,
+                        max=100,
+                        step=1,
+                        unit_of_measurement="samples",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
                 vol.Required(
                     CONF_AUTO_CALIBRATE_DEAD_TIME,
                     default=bool(
