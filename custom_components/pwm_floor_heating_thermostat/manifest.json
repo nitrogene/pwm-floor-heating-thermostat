@@ -3,6 +3,9 @@
   "name": "PWM Floor Heating Thermostat",
   "codeowners": ["@nitrogene"],
   "config_flow": true,
+  "categories": [
+    "climate"
+  ],
   "dependencies": [],
   "documentation": "https://github.com/nitrogene/pwm-floor-heating-thermostat",
   "integration_type": "entity",
