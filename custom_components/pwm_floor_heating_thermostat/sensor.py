@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -26,6 +27,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_EARLIEST_TRANSITION_TIME,
+    ATTR_NEXT_TRANSITION_REASON,
+    ATTR_NEXT_TRANSITION_TYPE,
     DOMAIN,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
@@ -123,6 +127,13 @@ SENSOR_TYPES: tuple[PwmSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda t: t._fsm_state if hasattr(t, "_fsm_state") else None,
     ),
+    PwmSensorEntityDescription(
+        key="next_transition_time",
+        translation_key="next_transition_time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda t: t._next_transition_time if hasattr(t, "_next_transition_time") else None,
+    ),
 )
 
 
@@ -177,6 +188,23 @@ class PwmDiagnosticSensor(CoordinatorEntity[PwmThermostatCoordinator], SensorEnt
         if t is None:
             return None
         return self.entity_description.value_fn(t)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes for diagnostic sensors."""
+        t = self.coordinator.thermostat
+        if t is None:
+            return {}
+        if self.entity_description.key == "next_transition_time":
+            earliest = getattr(t, "_earliest_transition_time", None)
+            return {
+                ATTR_NEXT_TRANSITION_TYPE: getattr(t, "_next_transition_type", "none"),
+                ATTR_NEXT_TRANSITION_REASON: getattr(t, "_next_transition_reason", "none"),
+                ATTR_EARLIEST_TRANSITION_TIME: (
+                    earliest.isoformat() if isinstance(earliest, datetime) else None
+                ),
+            }
+        return {}
 
     @property
     def device_info(self) -> DeviceInfo | None:

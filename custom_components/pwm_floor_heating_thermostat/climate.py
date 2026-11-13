@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -62,12 +62,16 @@ from .const import (
     ATTR_COUNTERS_DATE,
     ATTR_DEAD_TIME_MEASURED_HOURS,
     ATTR_DEAD_TIME_SAMPLES_COUNT,
+    ATTR_EARLIEST_TRANSITION_TIME,
     ATTR_EFFECTIVE_DEAD_TIME_HOURS,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
     ATTR_FORECAST_OUTDOOR_TEMP_24H,
     ATTR_HEAT_LOSS_CONFIDENCE_SAMPLES,
     ATTR_KALATA_PROCESS_NOISE,
     ATTR_MODEL_ERROR_RMS,
+    ATTR_NEXT_TRANSITION_REASON,
+    ATTR_NEXT_TRANSITION_TIME,
+    ATTR_NEXT_TRANSITION_TYPE,
     ATTR_RULE_B_THRESHOLD,
     ATTR_SENSOR_STALE,
     ATTR_SOLAR_CREDIT_KWH,
@@ -495,6 +499,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             config.get(CONF_HARD_OVERSHOOT_MARGIN, DEFAULT_HARD_OVERSHOOT_MARGIN)
         )
 
+        # Next transition estimation (v0.3.1)
+        self._next_transition_time: datetime | None = None
+        self._next_transition_type: str = "none"
+        self._next_transition_reason: str = "Model initializing"
+        self._earliest_transition_time: datetime | None = None
+
     async def async_added_to_hass(self) -> None:
         """Register event listeners and restore previous state."""
         await super().async_added_to_hass()
@@ -865,6 +875,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             CONF_MAX_CONTINUOUS_RUN_MINUTES: self._max_continuous_run_minutes,
             CONF_THERMAL_RUNAWAY_DERIVATIVE: self._thermal_runaway_derivative,
             CONF_HARD_OVERSHOOT_MARGIN: self._hard_overshoot_margin,
+            ATTR_NEXT_TRANSITION_TIME: (
+                self._next_transition_time.isoformat() if self._next_transition_time else None
+            ),
+            ATTR_NEXT_TRANSITION_TYPE: self._next_transition_type,
+            ATTR_NEXT_TRANSITION_REASON: self._next_transition_reason,
+            ATTR_EARLIEST_TRANSITION_TIME: (
+                self._earliest_transition_time.isoformat() if self._earliest_transition_time else None
+            ),
         }
 
     async def async_set_temperature(self, **kwargs) -> None:
@@ -1725,7 +1743,172 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._dead_time_samples_count += 1
                 self._heating_start_derivative = None  # Measure once per cycle
 
+        # 10. Next transition time estimation (v0.3.1)
+        self._update_next_transition_estimate(now_utc)
+
         self.async_write_ha_state()
+
+    def _find_scheduled_off_peak_start(self, now: datetime) -> datetime | None:
+        """Attempt to resolve the next scheduled off-peak slot start timestamp."""
+        if not self.hass or not hasattr(self.hass, "states") or not self.hass.states:
+            return None
+
+        # 1. Check attributes on off_peak_sensor
+        if self._off_peak_sensor:
+            st = self.hass.states.get(self._off_peak_sensor)
+            if st and hasattr(st, "attributes") and isinstance(st.attributes, dict):
+                for attr_key in ["next_start", "next_slot", "start_time", "start"]:
+                    val = st.attributes.get(attr_key)
+                    if isinstance(val, datetime):
+                        return val.astimezone(UTC) if val.tzinfo else val.replace(tzinfo=UTC)
+                    if isinstance(val, str):
+                        try:
+                            parsed = datetime.fromisoformat(val)
+                            return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                        except (ValueError, TypeError):
+                            pass
+
+        # 2. Check well-known input_datetime helper entities
+        helper_candidates = [
+            "input_datetime.heures_creuses_nuit_debut",
+            "input_datetime.heures_creuses_debut",
+            "input_datetime.hc_nuit_debut",
+            "input_datetime.hc_debut",
+        ]
+        for cand in helper_candidates:
+            st_cand = self.hass.states.get(cand)
+            if st_cand and getattr(st_cand, "state", None) not in [None, "unknown", "unavailable", "none"]:
+                state_str = str(st_cand.state).strip()
+                parts = state_str.split(":")
+                if len(parts) >= 2:
+                    try:
+                        h = int(parts[0])
+                        m = int(parts[1])
+                        s = int(parts[2]) if len(parts) > 2 else 0
+                        now_local = now.astimezone() if now.tzinfo else now
+                        today_local = now_local.replace(hour=h, minute=m, second=s, microsecond=0)
+                        if today_local <= now_local:
+                            slot_local = today_local + timedelta(days=1)
+                        else:
+                            slot_local = today_local
+                        return slot_local.astimezone(UTC)
+                    except (ValueError, TypeError):
+                        pass
+
+        return None
+
+    def _update_next_transition_estimate(self, now: datetime) -> None:
+        """Estimate the timestamp, type and rationale of the next FSM transition."""
+        # 1. When heating is ACTIVE (running_min_lock or running_normal) -> next transition is turn_off
+        if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            self._next_transition_type = "turn_off"
+            cycle_start = self._cycle_start_time or now
+            t_min = cycle_start + self._min_cycle_duration
+            self._earliest_transition_time = t_min
+
+            off_peak_active = False
+            if self._off_peak_sensor:
+                st = self.hass.states.get(self._off_peak_sensor)
+                off_peak_active = st is not None and getattr(st, "state", None) == "on"
+
+            if not off_peak_active:
+                # Peak hours: Rule G run duration cap
+                t_peak_cap = cycle_start + self._peak_max_run_duration
+                if t_peak_cap >= t_min:
+                    self._next_transition_time = t_peak_cap
+                    self._next_transition_reason = (
+                        f"Peak-hour top-up run cap reached ({int(self._peak_max_run_duration.total_seconds() // 60)} min)"
+                    )
+                else:
+                    self._next_transition_time = t_min
+                    self._next_transition_reason = (
+                        f"Danfoss minimum runtime lock ({int(self._min_cycle_duration.total_seconds() // 60)} min)"
+                    )
+            else:
+                # Off-peak hours: remaining thermal quota or continuous run cap
+                elapsed_cycle_hours = max(0.0, (now - cycle_start).total_seconds() / 3600.0)
+                total_hours_so_far = self._hours_run_today + elapsed_cycle_hours
+                remaining_hours = max(0.0, self._hours_needed_24h - total_hours_so_far)
+                t_quota = now + timedelta(hours=remaining_hours)
+                t_max_run = (
+                    cycle_start + timedelta(minutes=self._max_continuous_run_minutes)
+                    if self._max_continuous_run_minutes > 0
+                    else None
+                )
+
+                if t_max_run and t_max_run < t_quota:
+                    t_target = t_max_run
+                    reason = f"Max continuous run cap ({self._max_continuous_run_minutes} min thermal diffusion pause)"
+                else:
+                    t_target = t_quota
+                    reason = "Daily thermal quota completion"
+
+                if t_target < t_min:
+                    self._next_transition_time = t_min
+                    self._next_transition_reason = (
+                        f"Danfoss minimum runtime lock ({int(self._min_cycle_duration.total_seconds() // 60)} min)"
+                    )
+                else:
+                    self._next_transition_time = t_target
+                    self._next_transition_reason = reason
+            return
+
+        # 2. When heating is INACTIVE (idle or waiting_min_off) -> next transition is turn_on
+        self._next_transition_type = "turn_on"
+        t_min = now
+        if self._fsm_state == FSM_WAITING_MIN_OFF and self._last_state_change:
+            t_min = self._last_state_change + self._min_off_duration
+        self._earliest_transition_time = t_min
+
+        # Inhibit prediction if sensors are stale or window open
+        if self._sensor_stale:
+            self._next_transition_time = None
+            self._next_transition_reason = "Suspended: ambient sensor stale"
+            return
+        if self._window_open:
+            self._next_transition_time = None
+            self._next_transition_reason = "Suspended: window open"
+            return
+
+        # Attempt to resolve scheduled Off-Peak start time
+        t_off_peak: datetime | None = None
+        off_peak_start_time = self._find_scheduled_off_peak_start(now)
+        if off_peak_start_time is not None:
+            t_off_peak = off_peak_start_time + self._stagger_delay
+
+        # Evaluate cooling trajectory in Peak hours (Rule B anticipated drop)
+        t_drop: datetime | None = None
+        drop_hours: float | None = None
+        v = self._derivative_smooth
+        if v is not None and v < -0.01 and self._cur_temp is not None:
+            threshold = (
+                self._current_rule_b_threshold
+                if self._current_rule_b_threshold is not None
+                else self._rule_b_min_threshold
+            )
+            proj = self._temp_projected if self._temp_projected is not None else self._cur_temp
+            delta_drop = proj - (self._target_temp - threshold)
+            if delta_drop > 0:
+                drop_hours = delta_drop / abs(v)
+                t_drop = now + timedelta(hours=drop_hours)
+
+        stagger_m = int(self._stagger_delay.total_seconds() // 60)
+        stagger_suffix = f" (+{stagger_m}m stagger)" if stagger_m > 0 else ""
+
+        if t_off_peak is not None and (t_drop is None or t_off_peak <= t_drop):
+            self._next_transition_time = max(t_min, t_off_peak)
+            self._next_transition_reason = f"Off-peak precharge scheduled{stagger_suffix}"
+        elif t_drop is not None:
+            self._next_transition_time = max(t_min, t_drop)
+            self._next_transition_reason = (
+                f"Anticipated thermal drop below target in {round(drop_hours, 1)}h (cooling at {round(abs(v), 2)}°C/h)"
+            )
+        elif t_off_peak is not None:
+            self._next_transition_time = max(t_min, t_off_peak)
+            self._next_transition_reason = f"Off-peak precharge scheduled{stagger_suffix}"
+        else:
+            self._next_transition_time = None
+            self._next_transition_reason = "Idle (stable trajectory, no heating demand predicted)"
 
     async def _async_start_heating_safe(self) -> None:
         """Start compressor if minimum off-cycle safety conditions are satisfied."""

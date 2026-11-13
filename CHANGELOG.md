@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-11-13
+
+### Added
+- **Native Next Transition Diagnostic Companion Sensor (`sensor.<zone>_next_transition`)**:
+  - Automatically provisions a dedicated 9th diagnostic entity (`SensorDeviceClass.TIMESTAMP`) for each thermostat zone.
+  - Predicts and surfaces the exact future wall-clock timestamp of the next FSM state transition (`turn_on` or `turn_off`).
+  - Native Lovelace formatting displays relative time ("dans 1 heure", "in 45 minutes") or absolute timestamp according to user preferences.
+  - Companion entity exposes rich diagnostic attributes:
+    - `transition_type`: Direction of the upcoming transition (`turn_on` or `turn_off`).
+    - `transition_reason`: Detailed physical or FSM rationale (e.g. Danfoss 15 min rest, scheduled off-peak precharge with stagger, Rule B cooling drop, quota completion, peak run cap).
+    - `earliest_transition_time`: Earliest hardware-legal timestamp strictly respecting Danfoss compressor anti-short-cycle locks (30 min minimum runtime and 15 min pressure equalization rest).
+- **Thermodynamic FSM Lookahead Engine**:
+  - Implemented `_find_scheduled_off_peak_start(now)` dynamically detecting the next off-peak slot from linked sensors, schedule attributes, or `input_datetime` helpers.
+  - Implemented `_update_next_transition_estimate(now)` predicting turn-off during active heating (Danfoss minimum runtime lock, peak-hour top-up run cap, daily thermal quota completion, or max continuous run diffusion pause) and turn-on during resting states (Danfoss rest lock, staggered off-peak precharge, or slab cooling trajectory intersection with Rule B).
+- **Unit Test Suite**:
+  - Added `tests/test_v031_transition_sensor.py` (6 unit tests) validating turn-off predictions (peak cap, quota completion, max continuous run), turn-on predictions (Danfoss rest, staggered off-peak, cooling drop), and companion sensor attribute surfacing.
+
+### Changed
+- Bumped integration version to `0.3.1` in `manifest.json`.
+- Updated English and French translations with `next_transition_time` ("Next transition" / "Prochaine bascule").
+
+---
+
 ## [0.3.0] - 2026-11-13
 
 ### Added

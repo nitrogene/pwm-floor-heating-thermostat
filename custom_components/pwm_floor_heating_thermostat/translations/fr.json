@@ -114,6 +114,9 @@
           "running_normal": "En marche",
           "waiting_min_off": "Égalisation pressions"
         }
+      },
+      "next_transition_time": {
+        "name": "Prochaine bascule"
       }
     },
     "climate": {

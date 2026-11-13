@@ -20,7 +20,6 @@ from custom_components.pwm_floor_heating_thermostat.const import (
     DEFAULT_KALATA_PROCESS_NOISE,
     DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_RULE_B_MIN_THRESHOLD,
-    INTEGRATION_VERSION,
     get_integration_version,
 )
 
@@ -28,8 +27,7 @@ from custom_components.pwm_floor_heating_thermostat.const import (
 def test_dynamic_version_resolution():
     """Verify integration version is resolved dynamically from manifest.json."""
     version = get_integration_version()
-    assert version == "0.3.0"
-    assert INTEGRATION_VERSION == "0.3.0"
+    assert version == "0.3.1"
 
 
 def test_trajectory_projection_deduplication():

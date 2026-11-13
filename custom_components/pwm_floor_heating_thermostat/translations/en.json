@@ -113,6 +113,9 @@
           "running_normal": "Running",
           "waiting_min_off": "Pressure equalization"
         }
+      },
+      "next_transition_time": {
+        "name": "Next transition"
       }
     }
   }

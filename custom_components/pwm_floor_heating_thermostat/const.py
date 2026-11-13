@@ -180,3 +180,9 @@ CONF_HARD_OVERSHOOT_MARGIN = "hard_overshoot_margin"
 DEFAULT_HARD_OVERSHOOT_MARGIN = 1.0  # °C above target ceiling cutoff
 
 EMERGENCY_COMFORT_DEFICIT_OVERRIDE = 1.5  # °C below target emergency bypass
+
+# Next transition estimation
+ATTR_NEXT_TRANSITION_TIME = "next_transition_time"
+ATTR_NEXT_TRANSITION_TYPE = "next_transition_type"
+ATTR_NEXT_TRANSITION_REASON = "next_transition_reason"
+ATTR_EARLIEST_TRANSITION_TIME = "earliest_transition_time"

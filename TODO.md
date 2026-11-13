@@ -70,4 +70,13 @@ All items are ordered from **most critical to least critical**.
 - [x] **End-to-End Real Entity Unit Testing (Completed in v0.2.9) :**
   Implemented real entity unit test suite (`tests/test_real_entity_e2e.py`) executing Danfoss FSM transitions (30 min minimum run lock, 15 min minimum off lock), DTU 65.14 slab water loop safeties, Rule G peak-hour capping, and Mode A/B unconstrained adaptation directly on the real `PwmFloorHeatingThermostat` instance with time warping.
 
+---
+
+## 5. Companion Diagnostics & Predictive Lookahead (Completed in v0.3.1)
+
+- [x] **Next Transition Diagnostic Companion Sensor (`sensor.<zone>_next_transition`) :**
+  - Provisioned a dedicated 9th diagnostic sensor (`SensorDeviceClass.TIMESTAMP`) for each thermostat zone predicting the exact upcoming switch timestamp (`turn_on` or `turn_off`).
+  - Implemented thermodynamic lookahead logic in `climate.py` taking into account Danfoss compressor protections (30 min runtime, 15 min rest), off-peak precharge scheduling with zone stagger, thermal quota completion, peak run caps, and slab cooling trajectories.
+  - Surfaced rich attributes: `transition_type`, `transition_reason`, and `earliest_transition_time`.
+
 

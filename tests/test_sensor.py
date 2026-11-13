@@ -52,9 +52,9 @@ def test_sensor_setup_entry(mock_thermostat, mock_entry):
 
         await async_setup_entry(hass, mock_entry, mock_add_entities)
 
-        # 8 diagnostic sensors expected
+        # 9 diagnostic sensors expected
         assert len(added_entities) == len(SENSOR_TYPES)
-        assert len(added_entities) == 8
+        assert len(added_entities) == 9
 
         # Validate instantiated sensor properties
         sensor_map = {s.entity_description.key: s for s in added_entities}
