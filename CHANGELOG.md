@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.2] - 2026-11-13
+
+### Added
+- **Active Reconciliation & Anti-Hijack Relay Guard**:
+  - Implemented real-time event listener on `_heater_entity` (`async_track_state_change_event`). If the physical relay is turned ON unexpectedly by an external source (legacy thermostat, third-party automation, manual toggle) while FSM is resting (`FSM_IDLE` or `FSM_WAITING_MIN_OFF`), the thermostat immediately intercepts the event and schedules an active reconciliation cutoff (`turn_off`).
+  - Hardened `_async_stop_heating_safe()`: when FSM is in `FSM_IDLE` or `FSM_WAITING_MIN_OFF`, actively queries the physical heater entity state in Home Assistant; if `state == "on"`, immediately issues a `turn_off` service call.
+  - Startup reconciliation synchronization: verifies physical switch state upon `EVENT_HOMEASSISTANT_STARTED` during `_async_startup` to guarantee no residual boot-time heater excitation persists.
+- **Unit Test Suite**:
+  - Added `tests/test_v032_reconciliation.py` (5 unit tests) verifying reconciliation cutoff in `IDLE`, cutoff in `WAITING_MIN_OFF`, no-op when already `OFF`, immediate reaction to physical state change event, and clean bypass during authorized `RUNNING_MIN_LOCK`.
+
+### Changed
+- Bumped integration version to `0.3.2` in `manifest.json`.
+
+---
+
 ## [0.3.1] - 2026-11-13
 
 ### Added

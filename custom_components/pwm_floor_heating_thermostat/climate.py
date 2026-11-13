@@ -670,6 +670,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self._heater_entity and not self._dry_run:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._heater_entity], self._async_heater_entity_changed
+                )
+            )
+
         # Periodic control loop (every minute)
         self.async_on_remove(
             async_track_time_interval(
@@ -961,6 +968,21 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._observed_heater,
                 new_state.state,
             )
+
+    @callback
+    def _async_heater_entity_changed(self, event) -> None:
+        """Handle physical heater switch state change for active reconciliation."""
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+        if new_state.state == "on" and self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]:
+            _LOGGER.warning(
+                "Thermostat %s: heater entity %s turned ON unexpectedly while FSM state is %s. Scheduling reconciliation cutoff.",
+                self._name,
+                self._heater_entity,
+                self._fsm_state,
+            )
+            self.hass.async_create_task(self._async_stop_heating_safe())
 
     @callback
     def _async_quota_sensor_changed(self, event) -> None:
@@ -1977,6 +1999,26 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         now = dt_util.utcnow()
 
         if self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]:
+            # Reconciliation guard: Ensure physical heater is strictly OFF when FSM is resting
+            if not self._dry_run and self._heater_entity:
+                st = self.hass.states.get(self._heater_entity)
+                if st is not None and st.state == "on":
+                    domain = self._heater_entity.split(".")[0]
+                    _LOGGER.warning(
+                        "Reconciliation cutoff: heater entity %s is ON while FSM state is %s. Forcing turn_off.",
+                        self._heater_entity,
+                        self._fsm_state,
+                    )
+                    try:
+                        await self.hass.services.async_call(
+                            domain, "turn_off", {"entity_id": self._heater_entity}, blocking=False
+                        )
+                    except Exception as err:
+                        _LOGGER.error(
+                            "Failed to turn off heater entity %s during reconciliation: %s",
+                            self._heater_entity,
+                            err,
+                        )
             return
 
         if self._fsm_state == FSM_RUNNING_MIN_LOCK:

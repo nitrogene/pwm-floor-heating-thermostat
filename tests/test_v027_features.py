@@ -27,7 +27,7 @@ from custom_components.pwm_floor_heating_thermostat.const import (
 def test_dynamic_version_resolution():
     """Verify integration version is resolved dynamically from manifest.json."""
     version = get_integration_version()
-    assert version == "0.3.1"
+    assert version == "0.3.2"
 
 
 def test_trajectory_projection_deduplication():
