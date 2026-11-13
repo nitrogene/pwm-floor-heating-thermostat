@@ -23,7 +23,11 @@
           "heat_loss_confidence_samples": "Mode B Confidence Samples for Direct Application",
           "auto_calibrate_dead_time": "Mode B Auto-Adaptation of Dead Time Theta",
           "weather_entity": "Weather Service Entity (for 24h rolling forecast)",
-          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota"
+          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota",
+          "sensor_stale_timeout_minutes": "Ambient Sensor Stale Timeout / Watchdog (minutes)",
+          "max_continuous_run_minutes": "Global Maximum Continuous Run Duration (minutes)",
+          "thermal_runaway_derivative": "Thermal Runaway Derivative Cutoff (°C/h)",
+          "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)"
         }
       }
     },
@@ -69,7 +73,11 @@
           "comfort_safety_deficit": "Comfort Safety Deficit Threshold (°C)",
           "rule_b_min_threshold": "Rule B Minimum Anticipation Threshold (°C)",
           "weather_entity": "Weather Service Entity",
-          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota"
+          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota",
+          "sensor_stale_timeout_minutes": "Ambient Sensor Stale Timeout / Watchdog (minutes)",
+          "max_continuous_run_minutes": "Global Maximum Continuous Run Duration (minutes)",
+          "thermal_runaway_derivative": "Thermal Runaway Derivative Cutoff (°C/h)",
+          "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)"
         }
       }
     }

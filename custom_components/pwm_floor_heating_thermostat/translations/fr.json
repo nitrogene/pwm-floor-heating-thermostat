@@ -24,7 +24,11 @@
           "auto_calibrate_dead_time": "Auto-adaptation douce du temps mort Thêta (Mode B)",
           "peak_max_run_duration": "Durée maximale d'un cycle en Heures Pleines (minutes)",
           "weather_entity": "Entité service météo (prévisions horaires 24h)",
-          "use_weather_forecast_average": "Calculer le quota journalier sur la moyenne météo 24h"
+          "use_weather_forecast_average": "Calculer le quota journalier sur la moyenne météo 24h",
+          "sensor_stale_timeout_minutes": "Délai d'inactivité de la sonde ambiante / Watchdog (minutes)",
+          "max_continuous_run_minutes": "Durée maximale de marche continue globale (minutes)",
+          "thermal_runaway_derivative": "Seuil de dérivée d'emballement thermique (°C/h)",
+          "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)"
         }
       }
     },
@@ -70,7 +74,11 @@
           "comfort_safety_deficit": "Seuil de déficit thermique de sécurité confort (°C)",
           "rule_b_min_threshold": "Seuil plancher d'anticipation Règle B (°C)",
           "weather_entity": "Entité service météo",
-          "use_weather_forecast_average": "Calculer le quota journalier sur la moyenne météo 24h"
+          "use_weather_forecast_average": "Calculer le quota journalier sur la moyenne météo 24h",
+          "sensor_stale_timeout_minutes": "Délai d'inactivité de la sonde ambiante / Watchdog (minutes)",
+          "max_continuous_run_minutes": "Durée maximale de marche continue globale (minutes)",
+          "thermal_runaway_derivative": "Seuil de dérivée d'emballement thermique (°C/h)",
+          "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)"
         }
       }
     }

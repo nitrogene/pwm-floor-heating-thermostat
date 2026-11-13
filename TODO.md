@@ -15,14 +15,14 @@ All items are ordered from **most critical to least critical**.
 
 ---
 
-## 2. Sensor Reliability & Hardware Safety Guards (Code Review)
+## 2. Sensor Reliability & Hardware Safety Guards (Completed in v0.3.0)
 
-- [ ] **Stale Sensor Watchdog (Fail-Safe Heating Shutdown) :**
+- [x] **Stale Sensor Watchdog (Fail-Safe Heating Shutdown) :**
   Prevent blind continuous heating if a Zigbee sensor battery dies or the mesh link freezes without Home Assistant marking it `unavailable`:
   - Track update timestamps (`_cur_temp_ts`, `_outdoor_temp_ts`) on every incoming state change.
   - Enforce a configurable stale threshold between **90 and 120 minutes** (adapted to typical Zigbee heartbeat keep-alives to eliminate false positives in thermally stable rooms).
   - Transition FSM safely to `IDLE`, turn off active heating, expose `sensor_stale: true` attribute, and set an explicit reason in `decision_reason`.
-- [ ] **Software DTU 65.14 Slab Guards for Probe-less Installations :**
+- [x] **Software DTU 65.14 Slab Guards for Probe-less Installations :**
   Provide software-level slab protection when no embedded loop water return probe (`floor_temp_sensor`) is present:
   - **Thermal Runaway Cutoff :** Trigger emergency shutdown if ambient $dT/dt > +1.5^\circ\text{C/h}$ sustained for $> 30\,\text{min}$ during active heating.
   - **Hard Ambient Overshoot Ceiling :** Immediate unconditional heating cutoff if $T_{\text{cur}} \ge T_{\text{target}} + 1.0^\circ\text{C}$.
@@ -50,16 +50,16 @@ All items are ordered from **most critical to least critical**.
 
 ## 4. Code Quality, Deprecation Fixes & Architecture Modernization
 
-- [ ] **Expose Hardcoded Thermodynamic & Safety Parameters to UI (OptionsFlow):**
+- [x] **Expose Hardcoded Thermodynamic & Safety Parameters to UI (OptionsFlow) (Completed in v0.3.0):**
   Eliminate all hardcoded magic numbers by making advanced parameters runtime-configurable in `config_flow.py` (`OptionsFlow`) with sensible defaults matching recommended specifications:
   - [x] `CONF_KALATA_PROCESS_NOISE` ($q_{\text{proc}}$): default `0.005` $(\text{°C/h})^2/\text{h}$, bounds `[0.001, 0.100]`, step `0.001` (Implemented in v0.2.7).
   - [x] `CONF_OUTDOOR_PRECHARGE_MAX_TEMP`: default `12.0` °C, bounds `[5.0, 20.0]`, step `0.5` (Implemented in v0.2.7).
   - [x] `CONF_COMFORT_SAFETY_DEFICIT`: default `0.8` °C, bounds `[0.3, 2.5]`, step `0.1` (Implemented in v0.2.7).
   - [x] `CONF_RULE_B_MIN_THRESHOLD`: default `0.25` °C, bounds `[0.10, 1.00]`, step `0.05` (Implemented in v0.2.7).
-  - [ ] `CONF_SENSOR_STALE_TIMEOUT_MINUTES`: default `90` min, bounds `[30, 360]`, step `15`.
-  - [ ] `CONF_MAX_CONTINUOUS_RUN_MINUTES`: default `120` min (or 0 to disable), bounds `[30, 240]`, step `15`.
-  - [ ] `CONF_THERMAL_RUNAWAY_DERIVATIVE`: default `1.5` °C/h, bounds `[0.5, 3.0]`, step `0.1`.
-  - [ ] `CONF_HARD_OVERSHOOT_MARGIN`: default `1.0` °C, bounds `[0.3, 2.5]`, step `0.1`.
+  - [x] `CONF_SENSOR_STALE_TIMEOUT_MINUTES`: default `90` min, bounds `[30, 360]`, step `15` (Implemented in v0.3.0).
+  - [x] `CONF_MAX_CONTINUOUS_RUN_MINUTES`: default `120` min (or 0 to disable), bounds `[30, 240]`, step `15` (Implemented in v0.3.0).
+  - [x] `CONF_THERMAL_RUNAWAY_DERIVATIVE`: default `1.5` °C/h, bounds `[0.5, 3.0]`, step `0.1` (Implemented in v0.3.0).
+  - [x] `CONF_HARD_OVERSHOOT_MARGIN`: default `1.0` °C, bounds `[0.3, 2.5]`, step `0.1` (Implemented in v0.3.0).
 - [x] **Home Assistant Core 2024.x Modernization (Completed in v0.2.7):**
   - Replaced deprecated `EVENT_HOMEASSISTANT_START` with `EVENT_HOMEASSISTANT_STARTED`.
   - Resolved `sw_version` dynamically from `manifest.json` in `device_info` via `INTEGRATION_VERSION` rather than hardcoding static version strings in `climate.py` and `sensor.py`.
@@ -70,11 +70,4 @@ All items are ordered from **most critical to least critical**.
 - [x] **End-to-End Real Entity Unit Testing (Completed in v0.2.9) :**
   Implemented real entity unit test suite (`tests/test_real_entity_e2e.py`) executing Danfoss FSM transitions (30 min minimum run lock, 15 min minimum off lock), DTU 65.14 slab water loop safeties, Rule G peak-hour capping, and Mode A/B unconstrained adaptation directly on the real `PwmFloorHeatingThermostat` instance with time warping.
 
----
 
-## 5. Long-term Research & Feature Backlog
-
-- [ ] **Inter-Zone Convective Coupling :**
-  Model passive heat transfer drafts between adjacent zones (e.g. warm air draft rising from high-ceiling Living Room to mezzanine/Office).
-- [ ] **Dynamic Multi-Rate & Spot-Market Tariff Schedulers :**
-  Native integration for dynamic hourly pricing (EPEX Spot, NordPool, EDF Tempo 6-color matrix).

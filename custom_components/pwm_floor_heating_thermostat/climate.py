@@ -69,6 +69,7 @@ from .const import (
     ATTR_KALATA_PROCESS_NOISE,
     ATTR_MODEL_ERROR_RMS,
     ATTR_RULE_B_THRESHOLD,
+    ATTR_SENSOR_STALE,
     ATTR_SOLAR_CREDIT_KWH,
     ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS,
     ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE,
@@ -87,11 +88,13 @@ from .const import (
     CONF_ENFORCE_DAILY_QUOTA,
     CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
+    CONF_HARD_OVERSHOOT_MARGIN,
     CONF_HEAT_LOSS,
     CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
     CONF_HEATER,
     CONF_HEURES_CREUSES_SENSOR,
     CONF_KALATA_PROCESS_NOISE,
+    CONF_MAX_CONTINUOUS_RUN_MINUTES,
     CONF_MAX_CYCLES_PER_DAY,
     CONF_MAX_FLOOR_TEMP,
     CONF_MIN_CYCLE_DURATION,
@@ -104,10 +107,12 @@ from .const import (
     CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
     CONF_RULE_B_MIN_THRESHOLD,
+    CONF_SENSOR_STALE_TIMEOUT_MINUTES,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
+    CONF_THERMAL_RUNAWAY_DERIVATIVE,
     CONF_USE_WEATHER_FORECAST_AVERAGE,
     CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
@@ -126,9 +131,11 @@ from .const import (
     DEFAULT_DRY_RUN,
     DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
+    DEFAULT_HARD_OVERSHOOT_MARGIN,
     DEFAULT_HEAT_LOSS,
     DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
     DEFAULT_KALATA_PROCESS_NOISE,
+    DEFAULT_MAX_CONTINUOUS_RUN_MINUTES,
     DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MAX_TEMP,
@@ -141,14 +148,17 @@ from .const import (
     DEFAULT_PEAK_MAX_RUN_DURATION,
     DEFAULT_POWER_WATTS,
     DEFAULT_RULE_B_MIN_THRESHOLD,
+    DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_STAGGER_DELAY,
     DEFAULT_TARGET_TEMP,
+    DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
     DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
     DEFAULT_WINDOW_DROP_THRESHOLD,
     DEFAULT_WINDOW_TIMEOUT,
     DOMAIN,
+    EMERGENCY_COMFORT_DEFICIT_OVERRIDE,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
     FSM_RUNNING_NORMAL,
@@ -230,6 +240,18 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(
             CONF_USE_WEATHER_FORECAST_AVERAGE, default=DEFAULT_USE_WEATHER_FORECAST_AVERAGE
         ): cv.boolean,
+        vol.Optional(
+            CONF_SENSOR_STALE_TIMEOUT_MINUTES, default=DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES
+        ): cv.positive_int,
+        vol.Optional(
+            CONF_MAX_CONTINUOUS_RUN_MINUTES, default=DEFAULT_MAX_CONTINUOUS_RUN_MINUTES
+        ): cv.positive_int,
+        vol.Optional(
+            CONF_THERMAL_RUNAWAY_DERIVATIVE, default=DEFAULT_THERMAL_RUNAWAY_DERIVATIVE
+        ): vol.Coerce(float),
+        vol.Optional(
+            CONF_HARD_OVERSHOOT_MARGIN, default=DEFAULT_HARD_OVERSHOOT_MARGIN
+        ): vol.Coerce(float),
     }
 )
 
@@ -454,6 +476,24 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._decision_reason = "Model initializing"
         self._energy_needed_kwh = 0.0
         self._hours_needed_24h = 0.0
+
+        # Stale sensor watchdog & hardware safety guards
+        self._cur_temp_ts: datetime | None = None
+        self._outdoor_temp_ts: datetime | None = None
+        self._sensor_stale: bool = False
+        self._sensor_stale_timeout_minutes: int = int(
+            config.get(CONF_SENSOR_STALE_TIMEOUT_MINUTES, DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES)
+        )
+        self._max_continuous_run_minutes: int = int(
+            config.get(CONF_MAX_CONTINUOUS_RUN_MINUTES, DEFAULT_MAX_CONTINUOUS_RUN_MINUTES)
+        )
+        self._thermal_runaway_derivative: float = float(
+            config.get(CONF_THERMAL_RUNAWAY_DERIVATIVE, DEFAULT_THERMAL_RUNAWAY_DERIVATIVE)
+        )
+        self._thermal_runaway_start_time: datetime | None = None
+        self._hard_overshoot_margin: float = float(
+            config.get(CONF_HARD_OVERSHOOT_MARGIN, DEFAULT_HARD_OVERSHOOT_MARGIN)
+        )
 
     async def async_added_to_hass(self) -> None:
         """Register event listeners and restore previous state."""
@@ -820,6 +860,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ),
             ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE: self._weather_outage_fallback_active,
             ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS: round(self._unserved_quota_carryover_hours, 2),
+            ATTR_SENSOR_STALE: self._sensor_stale,
+            CONF_SENSOR_STALE_TIMEOUT_MINUTES: self._sensor_stale_timeout_minutes,
+            CONF_MAX_CONTINUOUS_RUN_MINUTES: self._max_continuous_run_minutes,
+            CONF_THERMAL_RUNAWAY_DERIVATIVE: self._thermal_runaway_derivative,
+            CONF_HARD_OVERSHOOT_MARGIN: self._hard_overshoot_margin,
         }
 
     async def async_set_temperature(self, **kwargs) -> None:
@@ -849,22 +894,26 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         try:
             self._cur_temp = float(new_state.state)
             now_utc = dt_util.utcnow()
+            lu = getattr(new_state, "last_updated", None)
+            self._cur_temp_ts = lu if isinstance(lu, datetime) else now_utc
             self._check_window_open_state(now_utc)
             self._update_trajectory_projection(now_utc)
             self.async_write_ha_state()
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     @callback
     def _async_outdoor_sensor_changed(self, event) -> None:
         """Handle outdoor temperature / weather forecast sensor state change."""
         new_state = event.data.get("new_state")
-        if new_state is None or new_state.state in ["unknown", "unavailable"]:
+        if new_state is None or getattr(new_state, "state", None) in ["unknown", "unavailable"]:
             return
         try:
             self._outdoor_temp = float(new_state.state)
+            lu = getattr(new_state, "last_updated", None)
+            self._outdoor_temp_ts = lu if isinstance(lu, datetime) else dt_util.utcnow()
             self.async_write_ha_state()
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     @callback
@@ -1204,19 +1253,25 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
     def _async_read_sensors(self) -> None:
         """Synchronize states from configured sensors."""
         st_in = self.hass.states.get(self._target_sensor)
-        if st_in and st_in.state not in ["unknown", "unavailable"]:
+        if st_in and getattr(st_in, "state", None) not in ["unknown", "unavailable"]:
             try:
                 self._cur_temp = float(st_in.state)
                 now_utc = dt_util.utcnow()
+                if self._cur_temp_ts is None:
+                    lu = getattr(st_in, "last_updated", None)
+                    self._cur_temp_ts = lu if isinstance(lu, datetime) else now_utc
                 self._check_window_open_state(now_utc)
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
 
         st_out = self.hass.states.get(self._outdoor_sensor)
-        if st_out and st_out.state not in ["unknown", "unavailable"]:
+        if st_out and getattr(st_out, "state", None) not in ["unknown", "unavailable"]:
             try:
                 self._outdoor_temp = float(st_out.state)
-            except ValueError:
+                if self._outdoor_temp_ts is None:
+                    lu = getattr(st_out, "last_updated", None)
+                    self._outdoor_temp_ts = lu if isinstance(lu, datetime) else dt_util.utcnow()
+            except (ValueError, TypeError):
                 pass
 
         if self._floor_temp_sensor:
@@ -1263,6 +1318,22 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         if self._fsm_state == FSM_WAITING_MIN_OFF and elapsed >= self._min_off_duration.total_seconds():
             self._fsm_state = FSM_IDLE
+
+        # Check Stale Sensor Watchdog
+        self._sensor_stale = False
+        if self._sensor_stale_timeout_minutes > 0:
+            if self._cur_temp_ts is None and self._target_sensor:
+                st_target = self.hass.states.get(self._target_sensor)
+                if st_target:
+                    lu = getattr(st_target, "last_updated", None)
+                    if isinstance(lu, datetime):
+                        self._cur_temp_ts = lu
+            if self._cur_temp_ts is not None and isinstance(self._cur_temp_ts, datetime):
+                elapsed_stale_sec = (now_utc - self._cur_temp_ts).total_seconds()
+                if isinstance(elapsed_stale_sec, (int, float)) and elapsed_stale_sec >= (
+                    self._sensor_stale_timeout_minutes * 60
+                ):
+                    self._sensor_stale = True
 
         # 1. Evaluate ventilation / window open state
         self._check_window_open_state(now_utc)
@@ -1418,8 +1489,15 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             proj_val = self._temp_projected if self._temp_projected is not None else self._cur_temp
             projected_error = self._target_temp - proj_val
 
+            # Rule 0: Emergency comfort deficit bypass (unconditional heating if room falls >= 1.5°C below target)
+            if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE:
+                should_heat = True
+                self._decision_reason = (
+                    f"Emergency comfort deficit bypass: curr {self._cur_temp}°C <= target {self._target_temp}°C - "
+                    f"{EMERGENCY_COMFORT_DEFICIT_OVERRIDE}°C (quota bypassed)"
+                )
             # Rule A: Priority thermal precharge during Off-Peak hours
-            if off_peak_active:
+            elif off_peak_active:
                 if error >= -0.5 and self._outdoor_temp <= self._outdoor_precharge_max_temp:
                     should_heat = True
                     self._decision_reason = (
@@ -1454,6 +1532,27 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._decision_reason = (
                     f"Idle (stable trajectory: curr {self._cur_temp}°C, "
                     f"projected {round(proj_val, 2)}°C in {self._dead_time}h)"
+                )
+
+            # Hard Ambient Overshoot Ceiling cutoff: unconditional immediate stop if room exceeds target + margin
+            if self._hard_overshoot_margin > 0 and self._cur_temp >= (self._target_temp + self._hard_overshoot_margin):
+                should_heat = False
+                self._decision_reason = (
+                    f"Hard overshoot ceiling cutoff: curr {self._cur_temp}°C >= "
+                    f"target {self._target_temp}°C + {self._hard_overshoot_margin}°C"
+                )
+
+            # Stale Sensor Watchdog Fail-Safe cutoff
+            if self._sensor_stale:
+                should_heat = False
+                stale_min = (
+                    int((now_utc - self._cur_temp_ts).total_seconds() // 60)
+                    if self._cur_temp_ts
+                    else self._sensor_stale_timeout_minutes
+                )
+                self._decision_reason = (
+                    f"Fail-safe shutdown: ambient sensor stale for {stale_min} min "
+                    f"(timeout: {self._sensor_stale_timeout_minutes} min)"
                 )
 
             # Rule D: Daily thermal quota enforcement during Peak hours
@@ -1521,6 +1620,42 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"Peak-hour top-up cycle completed ({int(active_run_sec // 60)} min run cap reached, "
                     f"allowing slab thermal diffusion)"
                 )
+
+        # Global Maximum Continuous Run Cap (mandatory slab diffusion pause across all tariffs)
+        if (
+            should_heat
+            and self._max_continuous_run_minutes > 0
+            and self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
+            and self._cycle_start_time
+        ):
+            active_run_sec = (now_utc - self._cycle_start_time).total_seconds()
+            is_freeze_emergency = self._floor_temp is not None and self._floor_temp <= self._min_floor_temp
+            if active_run_sec >= (self._max_continuous_run_minutes * 60) and not is_freeze_emergency:
+                should_heat = False
+                self._decision_reason = (
+                    f"Maximum continuous run duration reached ({int(active_run_sec // 60)} min >= "
+                    f"{self._max_continuous_run_minutes} min): enforcing thermal diffusion pause"
+                )
+
+        # Thermal Runaway Cutoff (abnormal heating rate dT/dt > threshold sustained for >30min)
+        if (
+            should_heat
+            and self._thermal_runaway_derivative > 0
+            and self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
+        ):
+            if self._derivative_smooth is not None and self._derivative_smooth > self._thermal_runaway_derivative:
+                if self._thermal_runaway_start_time is None:
+                    self._thermal_runaway_start_time = now_utc
+                elif (now_utc - self._thermal_runaway_start_time).total_seconds() >= 1800:
+                    should_heat = False
+                    self._decision_reason = (
+                        f"Emergency cutoff: thermal runaway detected (dT/dt = "
+                        f"{round(self._derivative_smooth, 2)}°C/h > {self._thermal_runaway_derivative}°C/h for >30m)"
+                    )
+            else:
+                self._thermal_runaway_start_time = None
+        else:
+            self._thermal_runaway_start_time = None
 
         # 6. Hydronic floor loop safeties (if sensor configured)
         if self._floor_temp is not None:
@@ -1701,3 +1836,4 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_WAITING_MIN_OFF
         self._last_state_change = now
         self._hvac_action = HVACAction.IDLE
+        self._thermal_runaway_start_time = None

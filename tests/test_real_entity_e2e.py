@@ -124,7 +124,7 @@ def test_e2e_dtu_max_floor_cutoff_and_freeze_safeties(mock_hass, base_config):
 
     async def _test():
         thermostat = PwmFloorHeatingThermostat(mock_hass, base_config)
-        thermostat._cur_temp = 17.0
+        thermostat._cur_temp = 18.0
         thermostat._target_temp = 19.0
         thermostat._outdoor_temp = 2.0
         thermostat._temp_projected = 16.5

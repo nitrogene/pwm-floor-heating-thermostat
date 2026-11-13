@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-11-13
+
+### Added
+- **Stale Sensor Watchdog (Fail-Safe Heating Shutdown)**:
+  - Tracks individual sensor update timestamps (`_cur_temp_ts`, `_outdoor_temp_ts`) on every incoming state change event.
+  - Configurable stale timeout via `CONF_SENSOR_STALE_TIMEOUT_MINUTES` (default: 90 min, range: 30 to 360 min, step: 15 min).
+  - Safely stops active heating, transitions FSM to `IDLE`, sets `sensor_stale: true` in `extra_state_attributes`, and records explicit diagnostic rationale in `decision_reason`.
+  - Automatically clears `sensor_stale` and resumes normal control as soon as a fresh reading is received.
+- **Software DTU 65.14 Slab Safeguards for Probe-less Installations**:
+  - **Thermal Runaway Cutoff**: Triggers emergency heating cutoff if room heating derivative $dT/dt > +1.5^\circ\text{C/h}$ sustained for $> 30\text{ min}$ during active heating (`CONF_THERMAL_RUNAWAY_DERIVATIVE`, default: 1.5°C/h, range: 0.5 to 3.0°C/h, step: 0.1°C/h).
+  - **Hard Ambient Overshoot Ceiling**: Unconditional immediate heating shutoff if room temperature exceeds target plus safety margin ($T_{\text{cur}} \ge T_{\text{target}} + \text{margin}$, `CONF_HARD_OVERSHOOT_MARGIN`, default: 1.0°C, range: 0.3 to 2.5°C, step: 0.1°C).
+  - **Global Maximum Continuous Run Cap (`max_continuous_run`)**: Enforces maximum continuous run cap (`CONF_MAX_CONTINUOUS_RUN_MINUTES`, default: 120 min, range: 30 to 240 min, step: 15 min) across all tariff periods (including Off-Peak hours) to guarantee mandatory thermal diffusion rest intervals in the heavy slab.
+  - **Emergency Comfort Deficit Bypass**: Rule 0 unconditional heating trigger if room falls severely below target ($T_{\text{cur}} \le T_{\text{target}} - 1.5^\circ\text{C}$), overriding daily thermal quota exhaustion blocks.
+- **Runtime UI Configuration (Config Flow & Options Flow)**:
+  - Exposed all four new safety parameters with UI number selectors (bounds, step, units) in both initial setup and runtime Options Flow.
+  - Complete English (`en.json`) and French (`fr.json`) localization of all new parameters and descriptions.
+- **Comprehensive Hardware Safety Test Suite**:
+  - Added `tests/test_v030_safeties.py` (6 unit tests) asserting fail-safe watchdog shutdown, recovery, hard overshoot ceiling, global continuous run cap, thermal runaway derivative cutoff, emergency comfort deficit bypass, and config/options flow validation.
+
+### Changed
+- Bumped integration version to `0.3.0` in `manifest.json`.
+
+---
+
 ## [0.2.9] - 2026-11-11
 
 ### Added

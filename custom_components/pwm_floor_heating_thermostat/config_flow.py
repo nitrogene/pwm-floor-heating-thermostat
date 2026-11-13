@@ -27,10 +27,12 @@ from .const import (
     CONF_ECO_TEMP,
     CONF_ENFORCE_DAILY_QUOTA,
     CONF_FLOOR_TEMP_SENSOR,
+    CONF_HARD_OVERSHOOT_MARGIN,
     CONF_HEAT_LOSS,
     CONF_HEAT_LOSS_CONFIDENCE_SAMPLES,
     CONF_HEATER,
     CONF_KALATA_PROCESS_NOISE,
+    CONF_MAX_CONTINUOUS_RUN_MINUTES,
     CONF_MAX_FLOOR_TEMP,
     CONF_MIN_FLOOR_TEMP,
     CONF_OBSERVED_HEATER,
@@ -40,10 +42,12 @@ from .const import (
     CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
     CONF_RULE_B_MIN_THRESHOLD,
+    CONF_SENSOR_STALE_TIMEOUT_MINUTES,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
+    CONF_THERMAL_RUNAWAY_DERIVATIVE,
     CONF_USE_WEATHER_FORECAST_AVERAGE,
     CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
@@ -57,16 +61,20 @@ from .const import (
     DEFAULT_DRY_RUN,
     DEFAULT_ECO_TEMP,
     DEFAULT_ENFORCE_DAILY_QUOTA,
+    DEFAULT_HARD_OVERSHOOT_MARGIN,
     DEFAULT_HEAT_LOSS,
     DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
     DEFAULT_KALATA_PROCESS_NOISE,
+    DEFAULT_MAX_CONTINUOUS_RUN_MINUTES,
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_NAME,
     DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_POWER_WATTS,
     DEFAULT_RULE_B_MIN_THRESHOLD,
+    DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
     DEFAULT_SLAB_TAU_HOURS,
+    DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
     DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
     DOMAIN,
@@ -198,6 +206,54 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_USE_WEATHER_FORECAST_AVERAGE,
                     default=DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_SENSOR_STALE_TIMEOUT_MINUTES,
+                    default=DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=360,
+                        step=15,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_CONTINUOUS_RUN_MINUTES,
+                    default=DEFAULT_MAX_CONTINUOUS_RUN_MINUTES,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=240,
+                        step=15,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_THERMAL_RUNAWAY_DERIVATIVE,
+                    default=DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5,
+                        max=3.0,
+                        step=0.1,
+                        unit_of_measurement="°C/h",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HARD_OVERSHOOT_MARGIN,
+                    default=DEFAULT_HARD_OVERSHOOT_MARGIN,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.3,
+                        max=2.5,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
@@ -536,6 +592,74 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         )
                     ),
                 ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SENSOR_STALE_TIMEOUT_MINUTES,
+                    default=int(
+                        curr.get(
+                            CONF_SENSOR_STALE_TIMEOUT_MINUTES,
+                            DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=360,
+                        step=15,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_MAX_CONTINUOUS_RUN_MINUTES,
+                    default=int(
+                        curr.get(
+                            CONF_MAX_CONTINUOUS_RUN_MINUTES,
+                            DEFAULT_MAX_CONTINUOUS_RUN_MINUTES,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=240,
+                        step=15,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_THERMAL_RUNAWAY_DERIVATIVE,
+                    default=float(
+                        curr.get(
+                            CONF_THERMAL_RUNAWAY_DERIVATIVE,
+                            DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5,
+                        max=3.0,
+                        step=0.1,
+                        unit_of_measurement="°C/h",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_HARD_OVERSHOOT_MARGIN,
+                    default=float(
+                        curr.get(
+                            CONF_HARD_OVERSHOOT_MARGIN,
+                            DEFAULT_HARD_OVERSHOOT_MARGIN,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.3,
+                        max=2.5,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 

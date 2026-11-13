@@ -10,9 +10,9 @@ def get_integration_version() -> str:
     try:
         manifest_path = Path(__file__).parent / "manifest.json"
         with open(manifest_path, encoding="utf-8") as f:
-            return str(json.load(f).get("version", "0.2.7"))
+            return str(json.load(f).get("version", "0.3.0"))
     except Exception:
-        return "0.2.7"
+        return "0.3.0"
 
 
 INTEGRATION_VERSION = get_integration_version()
@@ -164,3 +164,19 @@ ATTR_FORECAST_OUTDOOR_TEMP_24H = "forecast_outdoor_temp_24h"
 ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE = "weather_outage_fallback_active"
 ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS = "unserved_quota_carryover_hours"
 MAX_UNSERVED_QUOTA_CARRYOVER_HOURS = 2.0
+
+# Sensor stale watchdog & hardware safety guards
+CONF_SENSOR_STALE_TIMEOUT_MINUTES = "sensor_stale_timeout_minutes"
+DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES = 90  # 90 minutes watchdog timeout
+ATTR_SENSOR_STALE = "sensor_stale"
+
+CONF_MAX_CONTINUOUS_RUN_MINUTES = "max_continuous_run_minutes"
+DEFAULT_MAX_CONTINUOUS_RUN_MINUTES = 120  # Max 120 min continuous run even off-peak
+
+CONF_THERMAL_RUNAWAY_DERIVATIVE = "thermal_runaway_derivative"
+DEFAULT_THERMAL_RUNAWAY_DERIVATIVE = 1.5  # °C/h sustained positive slope cutoff
+
+CONF_HARD_OVERSHOOT_MARGIN = "hard_overshoot_margin"
+DEFAULT_HARD_OVERSHOOT_MARGIN = 1.0  # °C above target ceiling cutoff
+
+EMERGENCY_COMFORT_DEFICIT_OVERRIDE = 1.5  # °C below target emergency bypass
