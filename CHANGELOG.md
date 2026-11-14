@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.5] - 2026-11-14
+
+### Added
+- **UI Exposure for `off_peak_start_entity`**:
+  - Added `off_peak_start_entity` (`input_datetime` / `sensor`) to both `ConfigFlow` and `OptionsFlow` with English and French translations so users can configure their scheduled off-peak start time entity directly in the UI for `sensor.<zone>_next_transition_time`.
+
+---
+
 ## [0.3.4] - 2026-11-14
 
 ### Added

@@ -42,6 +42,7 @@ from .const import (
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
+    CONF_OFF_PEAK_START_ENTITY,
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
     CONF_OUTDOOR_SENSOR,
     CONF_PEAK_MAX_RUN_DURATION,
@@ -137,6 +138,9 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_OFF_PEAK_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
+                ),
+                vol.Optional(CONF_OFF_PEAK_START_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
                 ),
                 vol.Required(CONF_DRY_RUN, default=DEFAULT_DRY_RUN): selector.BooleanSelector(),
                 vol.Optional(CONF_OBSERVED_HEATER): selector.EntitySelector(
@@ -377,6 +381,12 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     description={"suggested_value": curr.get(CONF_HEATER)},
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["switch", "climate", "input_boolean"])
+                ),
+                vol.Optional(
+                    CONF_OFF_PEAK_START_ENTITY,
+                    description={"suggested_value": curr.get(CONF_OFF_PEAK_START_ENTITY)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
                 ),
                 vol.Required(
                     CONF_HEAT_LOSS,
