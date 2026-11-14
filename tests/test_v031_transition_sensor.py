@@ -152,18 +152,19 @@ def test_next_transition_scheduled_off_peak_with_stagger(base_config):
         t0 = datetime(2026, 11, 13, 20, 0, 0, tzinfo=UTC)
 
         base_config[CONF_STAGGER_DELAY] = 300  # 5 min stagger
+        base_config["off_peak_start_entity"] = "input_datetime.off_peak_start"
         thermostat = PwmFloorHeatingThermostat(hass, base_config)
         thermostat._hvac_mode = HVACMode.HEAT
         thermostat._fsm_state = FSM_IDLE
         thermostat._cur_temp = 19.5
         thermostat._target_temp = 19.0
 
-        # Helper entity input_datetime.heures_creuses_nuit_debut at 22:06:00
+        # Configured off-peak start helper entity at 22:06:00
         mock_helper = MagicMock()
         mock_helper.state = "22:06:00"
 
         def mock_get(entity_id):
-            if "heures_creuses" in entity_id:
+            if entity_id == "input_datetime.off_peak_start":
                 return mock_helper
             return None
 

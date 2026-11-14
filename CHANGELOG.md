@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.3] - 2026-11-14
+
+### Added
+- **Persistent FSM State & Daily Counters Across Restarts/Reloads (`F-01`)**:
+  - Persists `fsm_state`, `last_state_change`, `cycle_start_time`, `cycles_today`, `hours_run_today`, and `counters_date` inside the Home Assistant JSON `Store`.
+  - Implemented `_reconcile_restored_fsm()`: when Home Assistant restarts or the config entry reloads while a compressor is actively running (`FSM_RUNNING_MIN_LOCK` or `FSM_RUNNING_NORMAL`), the integration restores the active running state and original start timestamp instead of forcing `FSM_WAITING_MIN_OFF`, protecting the mandatory 30-minute Danfoss oil-return minimum runtime lock.
+- **Closed-Loop Physical Actuator Verification (`F-02`)**:
+  - Implemented hardware-agnostic `_reconcile_rejected_or_stopped_heater()` to verify that `self._heater_entity` genuinely transitions to `"on"` after a `turn_on` call.
+  - If a local hardware safety guard or manual override rejects the `turn_on` command (switch remains `"off"` past the 60-second confirmation window), the FSM cleanly reverts to `FSM_IDLE`, rolls back `_cycles_today`, and accumulates zero phantom runtime hours.
+  - If an active heater is turned off externally after running for at least 5 minutes, actual elapsed runtime is recorded and the FSM transitions to `FSM_WAITING_MIN_OFF` to enforce the 15-minute pressure equalization rest.
+- **Weather Forecast Service Response Caching (`F-17`)**:
+  - Added a 15-minute TTL cache (`_weather_forecast_cache` / `_weather_forecast_cache_ts`) in `_async_update_weather_forecast()` so `weather.get_forecasts` is called at most once every 15 minutes instead of every 60 seconds during the control loop.
+- **Unit Test Suite**:
+  - Added 4 reconciliation and safety tests in `tests/test_v032_reconciliation.py` (`F-01`, `F-02`, `F-03`) and `test_weather_forecast_cache_ttl` in `tests/test_v028_features.py` (88 unit tests passing).
+
+### Changed
+- **Code Hygiene & Dead Code Removal (`F-16`)**:
+  - Removed unused legacy constants from `const.py`, unused `_handle_thermostat_update` method from `sensor.py`, and unused imports from `config_flow.py`.
+- Bumped integration version to `0.3.3` in `manifest.json`.
+
+### Fixed
+- **Peak-Hour Max Run Duration Unit Mismatch (`F-03`)**:
+  - Fixed `_parse_timedelta()` where numeric `CONF_PEAK_MAX_RUN_DURATION` values saved by `OptionsFlow` (in minutes, e.g. `45`) were parsed as seconds (`45s` -> `0 min`), causing Rule G to cut off Peak-Hour heating cycles prematurely at 30 minutes. Numeric values for `CONF_PEAK_MAX_RUN_DURATION` are now explicitly parsed in minutes (`numeric_unit="minutes"`), and Rule G is guarded by `self._peak_max_run_duration.total_seconds() > 0`.
+- **Danfoss 30-Minute Minimum Runtime Protection in `_async_stop_heating_safe()` (`F-01`)**:
+  - Added a strict `min_cycle_duration` guard inside `_async_stop_heating_safe()` reconciliation so a running compressor within its 30-minute oil-return window can never be cut off prematurely.
+- **Midnight Daily Counter Reset & Solar Forecast Alignment in User Local Timezone (`F-15`)**:
+  - Replaced `datetime.now().date()` with `dt_util.now().date()` for midnight counter resets and aligned solar forecast timestamps with `dt_util.now()`.
+
+---
+
 ## [0.3.2] - 2026-11-13
 
 ### Added

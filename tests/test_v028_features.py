@@ -235,3 +235,47 @@ def test_config_flow_and_options_flow_weather_options(base_config):
         assert res_opt["data"][CONF_USE_WEATHER_FORECAST_AVERAGE] is False
 
     asyncio.run(_test())
+
+
+def test_weather_forecast_cache_ttl(base_config):
+    """Verify weather.get_forecasts is cached for 15 minutes and invalidated on state change."""
+    async def _test():
+        hass = MagicMock()
+        st_weather = MagicMock()
+        st_weather.state = "cloudy"
+        st_weather.attributes = {}
+        hass.states.get.return_value = st_weather
+        hass.services.has_service.return_value = True
+
+        t0 = dt_util.utcnow()
+        forecast_data = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 10.0}
+            for i in range(6)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.home": {"forecast": forecast_data}}
+        )
+
+        config = dict(base_config)
+        config[CONF_WEATHER_ENTITY] = "weather.home"
+        config[CONF_USE_WEATHER_FORECAST_AVERAGE] = True
+        thermostat = PwmFloorHeatingThermostat(hass, config)
+
+        # First call fetches from service
+        avg1 = await thermostat._async_get_weather_forecast_24h_average()
+        assert avg1 == 10.0
+        assert hass.services.async_call.await_count == 1
+
+        # Second call within TTL hits cache without calling service again
+        avg2 = await thermostat._async_get_weather_forecast_24h_average()
+        assert avg2 == 10.0
+        assert hass.services.async_call.await_count == 1
+
+        # State change invalidates cache
+        thermostat.hass = hass
+        thermostat._async_weather_entity_changed(None)
+        avg3 = await thermostat._async_get_weather_forecast_24h_average()
+        assert avg3 == 10.0
+        assert hass.services.async_call.await_count == 2
+
+    asyncio.run(_test())

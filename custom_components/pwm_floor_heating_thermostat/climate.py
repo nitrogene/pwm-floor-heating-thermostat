@@ -45,7 +45,6 @@ except ImportError:
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -108,6 +107,7 @@ from .const import (
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
+    CONF_OFF_PEAK_START_ENTITY,
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
     CONF_OUTDOOR_SENSOR,
     CONF_PEAK_MAX_RUN_DURATION,
@@ -176,6 +176,7 @@ from .const import (
     POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
     SOLAR_MORNING_CUTOFF_HOUR,
+    WEATHER_FORECAST_CACHE_TTL_SECONDS,
     WIND_AMPLIFICATION_GAIN,
     WIND_MAX_AMPLIFICATION,
     WIND_SPEED_CALM_THRESHOLD,
@@ -194,6 +195,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Required(CONF_TARGET_SENSOR): cv.entity_id,
         vol.Required(CONF_OUTDOOR_SENSOR): cv.entity_id,
         vol.Optional(CONF_OFF_PEAK_SENSOR): cv.entity_id,
+        vol.Optional(CONF_OFF_PEAK_START_ENTITY): cv.entity_id,
         vol.Optional(CONF_HEURES_CREUSES_SENSOR): cv.entity_id,
         vol.Optional(CONF_FLOOR_TEMP_SENSOR): cv.entity_id,
         vol.Optional(CONF_MAX_FLOOR_TEMP, default=DEFAULT_MAX_FLOOR_TEMP): vol.Coerce(float),
@@ -265,20 +267,46 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
-def _parse_timedelta(val: Any, default: timedelta) -> timedelta:
-    """Convert input duration (string, seconds, timedelta) to timedelta."""
+def _parse_timedelta(
+    val: Any, default: timedelta, numeric_unit: str = "seconds"
+) -> timedelta:
+    """Convert input duration (string, dict, numeric seconds/minutes, timedelta) to timedelta."""
     if val is None:
         return default
     if isinstance(val, timedelta):
         return val
+    if isinstance(val, dict):
+        try:
+            return timedelta(
+                **{
+                    k: float(v)
+                    for k, v in val.items()
+                    if k in ("days", "hours", "minutes", "seconds", "milliseconds")
+                }
+            )
+        except Exception:
+            return default
     if isinstance(val, (int, float)):
-        return timedelta(seconds=val)
+        if numeric_unit == "minutes":
+            return timedelta(minutes=float(val))
+        return timedelta(seconds=float(val))
     if isinstance(val, str):
+        if ":" not in val:
+            try:
+                num = float(val.strip())
+                if numeric_unit == "minutes":
+                    return timedelta(minutes=num)
+                return timedelta(seconds=num)
+            except Exception:
+                pass
         try:
             return cv.time_period(val)
         except Exception:
             try:
-                return timedelta(seconds=float(val))
+                num = float(val)
+                if numeric_unit == "minutes":
+                    return timedelta(minutes=num)
+                return timedelta(seconds=num)
             except Exception:
                 pass
     return default
@@ -346,6 +374,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._target_sensor = config[CONF_TARGET_SENSOR]
         self._outdoor_sensor = config[CONF_OUTDOOR_SENSOR]
         self._off_peak_sensor = config.get(CONF_OFF_PEAK_SENSOR) or config.get(CONF_HEURES_CREUSES_SENSOR)
+        self._off_peak_start_entity = config.get(CONF_OFF_PEAK_START_ENTITY)
         self._dry_run = bool(config.get(CONF_DRY_RUN, DEFAULT_DRY_RUN))
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
         self._weather_entity = config.get(CONF_WEATHER_ENTITY)
@@ -353,6 +382,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             config.get(CONF_USE_WEATHER_FORECAST_AVERAGE, DEFAULT_USE_WEATHER_FORECAST_AVERAGE)
         )
         self._forecast_outdoor_temp_24h: float | None = None
+        self._weather_forecast_cache_avg: float | None = None
+        self._weather_forecast_cache_ts: datetime | None = None
         self._weather_outage_fallback_active: bool = False
         self._unserved_quota_carryover_hours: float = 0.0
         self._prev_day_energy_quota_kwh: float | None = None
@@ -374,7 +405,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._min_off_duration = _parse_timedelta(config.get(CONF_MIN_OFF_CYCLE_DURATION), DEFAULT_MIN_OFF)
         self._max_cycles = int(config.get(CONF_MAX_CYCLES_PER_DAY, DEFAULT_MAX_CYCLES))
         self._peak_max_run_duration = _parse_timedelta(
-            config.get(CONF_PEAK_MAX_RUN_DURATION), DEFAULT_PEAK_MAX_RUN_DURATION
+            config.get(CONF_PEAK_MAX_RUN_DURATION),
+            DEFAULT_PEAK_MAX_RUN_DURATION,
+            numeric_unit="minutes",
         )
 
         # Daily thermal energy quota cap (Peak-hours anti-waste)
@@ -520,8 +553,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         return self._state_store
 
     def _build_persisted_state(self) -> dict[str, Any]:
-        """Serialize internal histories and observer state for persistent storage."""
+        """Serialize internal histories, FSM lock state, and observer state for persistent storage."""
         return {
+            "fsm_state": self._fsm_state,
+            "last_state_change": self._last_state_change.isoformat() if self._last_state_change else None,
+            "cycle_start_time": self._cycle_start_time.isoformat() if self._cycle_start_time else None,
+            "cycles_today": self._cycles_today,
+            "hours_run_today": round(self._hours_run_today, 4),
+            "counters_date": str(self._last_day_reset),
             "projection_history": [[t.isoformat(), v] for t, v in self._projection_history],
             "model_error_history": [[t.isoformat(), v] for t, v in self._model_error_history],
             "filtered_temp": self._filtered_temp,
@@ -602,15 +641,78 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 except (ValueError, TypeError):
                     pass
 
-        raw_obs_ts = data.get("observer_last_update")
-        if raw_obs_ts is not None:
-            try:
-                obs_ts = datetime.fromisoformat(str(raw_obs_ts))
-                if obs_ts.tzinfo is None:
-                    obs_ts = obs_ts.replace(tzinfo=UTC)
-                self._observer_last_update = obs_ts
-            except (ValueError, TypeError):
-                pass
+        for attr_name, key in (
+            ("_observer_last_update", "observer_last_update"),
+            ("_last_state_change", "last_state_change"),
+            ("_cycle_start_time", "cycle_start_time"),
+        ):
+            raw_ts = data.get(key)
+            if raw_ts is not None:
+                try:
+                    parsed_ts = datetime.fromisoformat(str(raw_ts))
+                    if parsed_ts.tzinfo is None:
+                        parsed_ts = parsed_ts.replace(tzinfo=UTC)
+                    setattr(self, attr_name, parsed_ts)
+                except (ValueError, TypeError):
+                    pass
+
+        today_str = str(dt_util.now().date())
+        if data.get("counters_date") == today_str:
+            if data.get("cycles_today") is not None:
+                try:
+                    self._cycles_today = int(data["cycles_today"])
+                except (ValueError, TypeError):
+                    pass
+            if data.get("hours_run_today") is not None:
+                try:
+                    self._hours_run_today = float(data["hours_run_today"])
+                except (ValueError, TypeError):
+                    pass
+
+        stored_fsm = data.get("fsm_state")
+        if stored_fsm in [FSM_IDLE, FSM_WAITING_MIN_OFF, FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            self._reconcile_restored_fsm(stored_fsm, now)
+
+    def _reconcile_restored_fsm(self, restored_fsm: str, now: datetime) -> None:
+        """Safely restore FSM state across restarts/reloads while preserving Danfoss 30-min runtime lock."""
+        if restored_fsm in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            st_heater = self.hass.states.get(self._heater_entity) if (self.hass and self._heater_entity) else None
+            heater_state = getattr(st_heater, "state", None) if st_heater is not None else None
+            ref_start = self._cycle_start_time or self._last_state_change
+            within_min_lock = (
+                self._cycle_start_time is not None
+                and (now - self._cycle_start_time) < self._min_cycle_duration
+            )
+
+            if heater_state == "on" or (within_min_lock and heater_state != "off"):
+                start_ts = ref_start or now
+                self._cycle_start_time = start_ts
+                self._last_state_change = start_ts
+                if (now - start_ts) < self._min_cycle_duration:
+                    self._fsm_state = FSM_RUNNING_MIN_LOCK
+                else:
+                    self._fsm_state = FSM_RUNNING_NORMAL
+                self._hvac_action = HVACAction.HEATING
+                self._simulated_heater_state = True
+                _LOGGER.info(
+                    "Thermostat %s restored active compressor cycle in %s (started at %s) to preserve Danfoss oil return.",
+                    self.name,
+                    self._fsm_state,
+                    start_ts.isoformat(),
+                )
+            else:
+                self._fsm_state = FSM_WAITING_MIN_OFF
+                self._last_state_change = now
+                self._cycle_start_time = None
+                self._hvac_action = HVACAction.IDLE
+                self._simulated_heater_state = False
+                _LOGGER.warning(
+                    "Thermostat %s restored after reboot with heater OFF. "
+                    "Safely transitioned to WAITING_MIN_OFF to enforce Danfoss pressure equalization.",
+                    self.name,
+                )
+        else:
+            self._fsm_state = restored_fsm
 
     async def async_added_to_hass(self) -> None:
         """Register event listeners and restore previous state."""
@@ -628,16 +730,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
             old_attrs = old_state.attributes
             restored_fsm = old_attrs.get("fsm_state", FSM_IDLE)
-            if restored_fsm in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
-                self._fsm_state = FSM_WAITING_MIN_OFF
-                self._last_state_change = dt_util.utcnow()
-                _LOGGER.warning(
-                    "Thermostat %s restored after reboot during active running state. "
-                    "Safely transitioned to WAITING_MIN_OFF to enforce Danfoss pressure equalization.",
-                    self.name,
-                )
-            else:
-                self._fsm_state = restored_fsm
+            self._reconcile_restored_fsm(restored_fsm, dt_util.utcnow())
 
             saved_date = old_attrs.get(ATTR_COUNTERS_DATE)
             today_str = str(dt_util.now().date())
@@ -848,8 +941,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         super().async_write_ha_state()
         if self._coordinator:
             self._coordinator.async_notify_update()
-        elif self._entry and hasattr(self, "hass") and self.hass:
-            async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
 
     @property
     def current_temperature(self) -> float | None:
@@ -1107,6 +1198,60 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._fsm_state,
             )
             self.hass.async_create_task(self._async_stop_heating_safe())
+        elif new_state.state == "off" and self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            if self._reconcile_rejected_or_stopped_heater(dt_util.utcnow(), force=True):
+                self.async_write_ha_state()
+
+    def _reconcile_rejected_or_stopped_heater(self, now: datetime, force: bool = False) -> bool:
+        """Reconcile FSM if the physical heater rejected a turn_on command or turned off externally."""
+        if self._dry_run or not self._heater_entity:
+            return False
+        if self._fsm_state not in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            return False
+
+        if not force:
+            st = self.hass.states.get(self._heater_entity) if self.hass else None
+            if st is None or getattr(st, "state", None) != "off":
+                return False
+
+        ref_start = self._cycle_start_time or self._last_state_change
+        elapsed_run = (now - ref_start).total_seconds()
+        if not force and elapsed_run < 5.0:
+            return False
+
+        if elapsed_run < 300.0:
+            # Command rejected by hardware local guard or manual override before 5-min minimum run
+            if self._cycles_today > 0:
+                self._cycles_today -= 1
+            self._cycle_start_time = None
+            self._fsm_state = FSM_IDLE
+            self._hvac_action = HVACAction.IDLE
+            self._simulated_heater_state = False
+            self._schedule_state_save()
+            _LOGGER.warning(
+                "Actuator confirmation failed for %s: %s is OFF %.0fs after turn_on (hardware guard or manual override). "
+                "Reconciled FSM back to IDLE without counting cycle.",
+                self._name,
+                self._heater_entity,
+                elapsed_run,
+            )
+        else:
+            # Heater ran and was turned off externally: record actual runtime and enforce 15-min rest
+            if self._cycle_start_time is not None:
+                self._hours_run_today += elapsed_run / 3600.0
+                self._cycle_start_time = None
+            self._fsm_state = FSM_WAITING_MIN_OFF
+            self._last_state_change = now
+            self._hvac_action = HVACAction.IDLE
+            self._simulated_heater_state = False
+            self._schedule_state_save()
+            _LOGGER.warning(
+                "Heater %s for %s turned OFF externally after %.1f min. Transitioned FSM to WAITING_MIN_OFF.",
+                self._heater_entity,
+                self._name,
+                elapsed_run / 60.0,
+            )
+        return True
 
     @callback
     def _async_quota_sensor_changed(self, event) -> None:
@@ -1161,21 +1306,31 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_weather_entity_changed(self, event: Any) -> None:
-        """Handle weather entity state change and trigger regulation cycle."""
+        """Handle weather entity state change, invalidate forecast cache, and trigger regulation."""
+        self._weather_forecast_cache_ts = None
         self.hass.async_create_task(self._async_control_heating())
 
     async def _async_get_weather_forecast_24h_average(self) -> float | None:
-        """Fetch rolling 24-hour hourly forecast average from weather service."""
+        """Fetch rolling 24-hour hourly forecast average from weather service (with 15-min TTL cache)."""
         if not self._weather_entity:
             return None
         st_weather = self.hass.states.get(self._weather_entity)
         if not st_weather or st_weather.state in ["unknown", "unavailable"]:
+            self._weather_forecast_cache_ts = None
             _LOGGER.warning(
                 "Weather entity %s is %s; cannot compute 24h forecast average",
                 self._weather_entity,
                 st_weather.state if st_weather else "missing",
             )
             return None
+
+        now_utc = dt_util.utcnow()
+        if (
+            self._weather_forecast_cache_ts is not None
+            and self._weather_forecast_cache_avg is not None
+            and (now_utc - self._weather_forecast_cache_ts).total_seconds() < WEATHER_FORECAST_CACHE_TTL_SECONDS
+        ):
+            return self._weather_forecast_cache_avg
 
         forecast_list: list[dict[str, Any]] = []
         if self.hass.services.has_service("weather", "get_forecasts"):
@@ -1223,7 +1378,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ]
 
         if temps:
-            return round(sum(temps) / len(temps), 2)
+            avg = round(sum(temps) / len(temps), 2)
+            self._weather_forecast_cache_avg = avg
+            self._weather_forecast_cache_ts = now_utc
+            return avg
         return None
 
     @property
@@ -1767,6 +1925,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if (
             should_heat
             and not off_peak_active
+            and self._peak_max_run_duration.total_seconds() > 0
             and self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
             and self._cycle_start_time
         ):
@@ -1916,17 +2075,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                         except (ValueError, TypeError):
                             pass
 
-        # 2. Check well-known input_datetime helper entities
-        helper_candidates = [
-            "input_datetime.heures_creuses_nuit_debut",
-            "input_datetime.heures_creuses_debut",
-            "input_datetime.hc_nuit_debut",
-            "input_datetime.hc_debut",
-        ]
-        for cand in helper_candidates:
-            st_cand = self.hass.states.get(cand)
-            if st_cand and getattr(st_cand, "state", None) not in [None, "unknown", "unavailable", "none"]:
-                state_str = str(st_cand.state).strip()
+        # 2. Check optional configured off_peak_start_entity (e.g. input_datetime or timestamp sensor)
+        if self._off_peak_start_entity:
+            st_start = self.hass.states.get(self._off_peak_start_entity)
+            if st_start and getattr(st_start, "state", None) not in [None, "unknown", "unavailable", "none"]:
+                state_str = str(st_start.state).strip()
                 parts = state_str.split(":")
                 if len(parts) >= 2:
                     try:
@@ -2063,6 +2216,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         now = dt_util.utcnow()
 
         if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            self._reconcile_rejected_or_stopped_heater(now)
             return
 
         # Check daily compressor cycle budget (Danfoss anti-fatigue)
@@ -2119,16 +2273,39 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._demand_start_time = None
         self._hvac_action = HVACAction.HEATING
         self._cycles_today += 1
+        self._schedule_state_save()
 
     async def _async_stop_heating_safe(self) -> None:
         """Stop compressor if and only if minimum runtime safety is satisfied."""
         now = dt_util.utcnow()
+
+        if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            if self._reconcile_rejected_or_stopped_heater(now):
+                return
 
         if self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]:
             # Reconciliation guard: Ensure physical heater is strictly OFF when FSM is resting
             if not self._dry_run and self._heater_entity:
                 st = self.hass.states.get(self._heater_entity)
                 if st is not None and st.state == "on":
+                    # Never interrupt an active compressor within its Danfoss 30-min minimum runtime lock
+                    if (
+                        self._cycle_start_time is not None
+                        and (now - self._cycle_start_time) < self._min_cycle_duration
+                    ):
+                        _LOGGER.warning(
+                            "Reconciliation cutoff deferred for %s: compressor is within Danfoss 30-min runtime lock "
+                            "(%ds remaining). Restoring FSM to RUNNING_MIN_LOCK.",
+                            self._heater_entity,
+                            int((self._min_cycle_duration - (now - self._cycle_start_time)).total_seconds()),
+                        )
+                        self._fsm_state = FSM_RUNNING_MIN_LOCK
+                        self._last_state_change = self._cycle_start_time
+                        self._hvac_action = HVACAction.HEATING
+                        self._simulated_heater_state = True
+                        self._schedule_state_save()
+                        return
+
                     domain = self._heater_entity.split(".")[0]
                     _LOGGER.warning(
                         "Reconciliation cutoff: heater entity %s is ON while FSM state is %s. Forcing turn_off.",
@@ -2187,4 +2364,5 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_WAITING_MIN_OFF
         self._last_state_change = now
         self._hvac_action = HVACAction.IDLE
+        self._schedule_state_save()
         self._thermal_runaway_start_time = None

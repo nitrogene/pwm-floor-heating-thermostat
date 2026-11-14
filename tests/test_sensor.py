@@ -102,6 +102,6 @@ def test_sensor_update_callback(mock_thermostat, mock_entry):
     sensor = PwmDiagnosticSensor(mock_thermostat, description, mock_entry)
     sensor.async_write_ha_state = MagicMock()
 
-    # Trigger update notification callback
-    sensor._handle_thermostat_update()
+    # Trigger coordinator update notification callback
+    sensor._handle_coordinator_update()
     sensor.async_write_ha_state.assert_called_once()

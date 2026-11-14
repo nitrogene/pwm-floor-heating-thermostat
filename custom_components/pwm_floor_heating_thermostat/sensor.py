@@ -21,7 +21,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -216,8 +216,3 @@ class PwmDiagnosticSensor(CoordinatorEntity[PwmThermostatCoordinator], SensorEnt
             model="PWM Thermodynamic Underfloor Thermostat",
             sw_version=INTEGRATION_VERSION,
         )
-
-    @callback
-    def _handle_thermostat_update(self) -> None:
-        """Update sensor state when master thermostat dispatches an update."""
-        self.async_write_ha_state()

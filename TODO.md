@@ -1,82 +1,61 @@
 # Development Roadmap & Technical Specifications (TODO.md)
 
-This document tracks all **pending tasks, algorithmic improvements, and technical milestones** remaining to be implemented for the **PWM Floor Heating Thermostat** (`pwm_floor_heating_thermostat`) integration.
-All items are ordered from **most critical to least critical**.
+This document tracks all **pending tasks, bug fixes, algorithmic improvements, and technical milestones** for the **PWM Floor Heating Thermostat** (`pwm_floor_heating_thermostat`) integration following the v0.3.2 code review.
+All items are strictly ordered from **most critical to least critical**.
 
 ---
 
-## 1. Critical Stability & Kalata Filter De-noising (Release v0.2.7) [COMPLETED]
+## 1. Critical / Blocking Fixes (Mechanical & Regulation Safety)
 
-- [x] **Eradicate Sawtooth Oscillations on Projected Temperature ($T_{\text{projected}}$) (Completed in v0.2.7):**
-  Real-world telemetry revealed persistent $\pm 0.8^\circ\text{C}$ to $1.2^\circ\text{C}$ sawtooth oscillations on $T_{\text{projected}}$ occurring on every $0.1^\circ\text{C}$ discrete step of Zigbee ambient sensors:
-  - **Continuous-Discrete Kalata Formulation & Process Noise Tuning ($q_{\text{proc}}$):** Lowered process noise acceleration parameter $q_{\text{proc}}$ from `1.0` to `0.005` $(\text{°C/h})^2/\text{h}$ in [`climate.py`](custom_components/pwm_floor_heating_thermostat/climate.py) and applied continuous tracking gains $K_p = \sqrt{2}\omega_0, K_v = \omega_0^2$ with $\omega_0 = (q_{\text{proc}} / \sigma_v^2)^{0.25}$, completely eliminating gain explosion when $dt \to 0$.
-  - **Deduplicate Projection Updates in Heating Loop:** Eliminated duplicate projection calculation in `_async_read_sensors` right before `_async_control_heating`, and added a sub-second deduplication guard (< 1 second) in `_update_trajectory_projection`.
-  - **First-Order Low-Pass Filter on Derivative:** Applied a 1-hour first-order low-pass filter on the velocity derivative ($\tau_v = 1.0\,\text{h}$), feeding a smooth derivative into $T_{\text{projected}} = T_{\text{filtered}} + \theta \cdot (dT/dt)_{\text{smooth}}$, completely eliminating quantization ringing.
-
----
-
-## 2. Sensor Reliability & Hardware Safety Guards (Completed in v0.3.0)
-
-- [x] **Stale Sensor Watchdog (Fail-Safe Heating Shutdown) :**
-  Prevent blind continuous heating if a Zigbee sensor battery dies or the mesh link freezes without Home Assistant marking it `unavailable`:
-  - Track update timestamps (`_cur_temp_ts`, `_outdoor_temp_ts`) on every incoming state change.
-  - Enforce a configurable stale threshold between **90 and 120 minutes** (adapted to typical Zigbee heartbeat keep-alives to eliminate false positives in thermally stable rooms).
-  - Transition FSM safely to `IDLE`, turn off active heating, expose `sensor_stale: true` attribute, and set an explicit reason in `decision_reason`.
-- [x] **Software DTU 65.14 Slab Guards for Probe-less Installations :**
-  Provide software-level slab protection when no embedded loop water return probe (`floor_temp_sensor`) is present:
-  - **Thermal Runaway Cutoff :** Trigger emergency shutdown if ambient $dT/dt > +1.5^\circ\text{C/h}$ sustained for $> 30\,\text{min}$ during active heating.
-  - **Hard Ambient Overshoot Ceiling :** Immediate unconditional heating cutoff if $T_{\text{cur}} \ge T_{\text{target}} + 1.0^\circ\text{C}$.
-  - **Global Maximum Continuous Run Cap (`max_continuous_run`) :** Extend the maximum continuous run cap (120 min) across all tariff periods (including Off-Peak hours) to ensure mandatory thermal diffusion intervals in the heavy slab.
-  - **Emergency Comfort Deficit Bypass :** Unconditional emergency heating trigger if ambient temperature drops severely below target ($T_{\text{cur}} \le T_{\text{target}} - 1.5^\circ\text{C}$), overriding daily quota blocks.
+- [x] **[BLOCKING - F-01] Preserve Danfoss 30-Minute Minimum Runtime Lock Across Restarts & Reloads (`climate.py:624-634`, `climate.py:2127-2148`) :**
+  - Persist `_fsm_state`, `_last_state_change`, and `_cycle_start_time` in the self-contained Home Assistant `Store`.
+  - In `async_added_to_hass`, if the physical `heater` switch is currently `"on"` (or was in `FSM_RUNNING_MIN_LOCK` / `FSM_RUNNING_NORMAL`), restore the active running state and original `_cycle_start_time` / `_last_state_change` instead of forcing `FSM_WAITING_MIN_OFF`.
+  - Ensure the active reconciliation guard in `_async_stop_heating_safe()` never cuts off a running compressor before `min_cycle_duration` (30 min) has elapsed since its actual start time.
+- [x] **[BLOCKING - F-03] Fix Minutes-vs-Seconds Unit Mismatch on `peak_max_run_duration` (`config_flow.py:497-511`, `climate.py:268-285`, `climate.py:376-378`, `climate.py:1780`) :**
+  - `OptionsFlow` stores `CONF_PEAK_MAX_RUN_DURATION` as a number in **minutes** (e.g. `45`), whereas `_parse_timedelta` interprets numeric `int`/`float` values as **seconds** (`45s`), resulting in `peak_max_run_duration_min: 0` and prematurely cutting off every Peak-Hour heating cycle at 30 minutes via Rule G.
+  - Explicitly parse numeric `CONF_PEAK_MAX_RUN_DURATION` values as **minutes** (`timedelta(minutes=float(val))`), and guard Rule G with `if self._peak_max_run_duration.total_seconds() > 0:`.
+- [x] **[BLOCKING - F-02] Verify Physical Actuator State Transitions (Closed-Loop FSM Confirmation) (`climate.py:2104-2121`, `climate.py:2172-2189`) :**
+  - Without coupling the integration to any specific hardware controller (preserving the v0.3.2 decoupling architecture), prevent phantom FSM transitions when a hardware controller (e.g. ESPHome local safety guard or manual override) rejects a `turn_on` command.
+  - Verify that `self._heater_entity` actually transitions to `"on"` (or reconcile back to `FSM_IDLE` without incrementing `_cycles_today` or accumulating `_hours_run_today` if the switch remains `"off"` after a short confirmation grace window).
 
 ---
 
-## 3. Algorithmic Refinement & Quota Forecast Stabilization
+## 2. Major Fixes (Thermodynamic Model, Safeties & Home Assistant Integration)
 
-- [x] **Adaptive Rule B Trigger Threshold & RMS Diagnostic Metric (Completed in v0.2.7):**
-  - Replaced the rigid $0.15^\circ\text{C}$ fixed threshold with an adaptive threshold scaled by model uncertainty:
-    $$\text{threshold} = \max(\text{rule\_b\_min\_threshold},\; 2.0 \cdot \text{RMS}(e_{\text{model}}))$$
-    preventing spurious turn-ons triggered by background measurement noise.
-  - Aggregated continuous 24h rolling $\text{RMS}(e_{\text{model}})$ and exposed it as an entity attribute (`model_error_rms`, `rule_b_threshold`, `rule_b_min_threshold`) and as a dedicated companion diagnostic entity in `sensor.py`.
-  - Configurable `rule_b_min_threshold` baseline floor via `OptionsFlow`.
-- [x] **Rolling 24h Forecast Weather Average for Daily Thermal Quota (Completed in v0.2.8) :**
-  - Stabilized daily energy quota calculation ($E_{\text{day}}$) by calculating outdoor delta against the rolling 24h average forecast from weather service (`weather.get_forecasts`) rather than instantaneous temperature spikes or an inflexible fixed 04:00 AM snapshot.
-  - **Weather Outage Fallback :** In case weather entity is `unavailable`, gracefully falls back to the previous day's quota $+5\%$ or last valid reading with a warning log.
-  - **Unserved Quota Carry-Over :** Carries over unserved duty time at midnight (capped at 2.0h) to the next day when heating was temporarily suspended (e.g. by window opening or peak cap).
-  - **Configurable Precharge Ceiling Seuil :** Moved hardcoded `OUTDOOR_PRECHARGE_MAX_TEMP` (12.0°C) into `OptionsFlow` settings.
-  - **Config Flow & Options Flow Toggle :** Exposed `weather_entity` selector and `use_weather_forecast_average` toggle in UI.
-
----
-
-## 4. Code Quality, Deprecation Fixes & Architecture Modernization
-
-- [x] **Expose Hardcoded Thermodynamic & Safety Parameters to UI (OptionsFlow) (Completed in v0.3.0):**
-  Eliminate all hardcoded magic numbers by making advanced parameters runtime-configurable in `config_flow.py` (`OptionsFlow`) with sensible defaults matching recommended specifications:
-  - [x] `CONF_KALATA_PROCESS_NOISE` ($q_{\text{proc}}$): default `0.005` $(\text{°C/h})^2/\text{h}$, bounds `[0.001, 0.100]`, step `0.001` (Implemented in v0.2.7).
-  - [x] `CONF_OUTDOOR_PRECHARGE_MAX_TEMP`: default `12.0` °C, bounds `[5.0, 20.0]`, step `0.5` (Implemented in v0.2.7).
-  - [x] `CONF_COMFORT_SAFETY_DEFICIT`: default `0.8` °C, bounds `[0.3, 2.5]`, step `0.1` (Implemented in v0.2.7).
-  - [x] `CONF_RULE_B_MIN_THRESHOLD`: default `0.25` °C, bounds `[0.10, 1.00]`, step `0.05` (Implemented in v0.2.7).
-  - [x] `CONF_SENSOR_STALE_TIMEOUT_MINUTES`: default `90` min, bounds `[30, 360]`, step `15` (Implemented in v0.3.0).
-  - [x] `CONF_MAX_CONTINUOUS_RUN_MINUTES`: default `120` min (or 0 to disable), bounds `[30, 240]`, step `15` (Implemented in v0.3.0).
-  - [x] `CONF_THERMAL_RUNAWAY_DERIVATIVE`: default `1.5` °C/h, bounds `[0.5, 3.0]`, step `0.1` (Implemented in v0.3.0).
-  - [x] `CONF_HARD_OVERSHOOT_MARGIN`: default `1.0` °C, bounds `[0.3, 2.5]`, step `0.1` (Implemented in v0.3.0).
-- [x] **Home Assistant Core 2024.x Modernization (Completed in v0.2.7):**
-  - Replaced deprecated `EVENT_HOMEASSISTANT_START` with `EVENT_HOMEASSISTANT_STARTED`.
-  - Resolved `sw_version` dynamically from `manifest.json` in `device_info` via `INTEGRATION_VERSION` rather than hardcoding static version strings in `climate.py` and `sensor.py`.
-  - Removed dead variable `_heating_start_temp` in `climate.py`.
-- [x] **Architecture Evolution toward `DataUpdateCoordinator` (Completed in v0.2.8) :**
-  - Refactored entity-to-sensor communication by replacing the overridden `async_write_ha_state()` dispatcher pattern with a native Home Assistant `DataUpdateCoordinator` (`PwmThermostatCoordinator`).
-  - Completely eliminated the retry busy loop (`asyncio.sleep(0.1)`) in `sensor.py`.
-- [x] **End-to-End Real Entity Unit Testing (Completed in v0.2.9) :**
-  Implemented real entity unit test suite (`tests/test_real_entity_e2e.py`) executing Danfoss FSM transitions (30 min minimum run lock, 15 min minimum off lock), DTU 65.14 slab water loop safeties, Rule G peak-hour capping, and Mode A/B unconstrained adaptation directly on the real `PwmFloorHeatingThermostat` instance with time warping.
+- [ ] **[MAJOR - F-07] Fix Mode A / Mode B Heat Loss ($H$) Auto-Calibration Downward Drift (`climate.py:1525-1541`, `climate.py:1848-1873`) :**
+  - `_heat_loss_samples_count` is currently incremented every minute during `_async_control_heating` whenever `_derivative_smooth < -0.05`, including daytime periods with solar or internal heat gains. This reaches `heat_loss_confidence_samples` (10) within 10 minutes and unlocks unconstrained downward drift to `0.5 W/K`.
+  - Restrict Mode A sampling to genuine night-time cooling windows (e.g. 23:00–06:00 local time, zero solar irradiance), throttle sample counting to at most 1 sample per hour (or 1 consolidated sample per night), and enforce a realistic lower safety bound (e.g. `>= 0.5 * self._heat_loss`) even after `heat_loss_confidence_samples` is reached.
+- [ ] **[MAJOR - F-08] Prevent Rule B Anticipation Paralysis from Positive-Slope Projection Errors (`climate.py:1376`, `climate.py:1401-1415`, `climate.py:1675-1688`, `const.py:51`) :**
+  - Linear tangent extrapolation over `dead_time` during solar gains or active heating inflates `model_error_rms`, pushing `rule_b_threshold = 2.0 * RMS` above `1.1°C–2.5°C` and completely disabling Peak-Hour dead-time anticipation.
+  - Lower `DEFAULT_KALATA_PROCESS_NOISE` from `0.005` to `0.001`, restrict `_model_error_history` accumulation to passive cooling regimes (or cap `rule_b_threshold` at a sane ceiling such as `0.6°C`).
+- [ ] **[MAJOR - F-04] Decouple Safety Guards from Outdoor Sensor Availability (`climate.py:1653-1748`) :**
+  - Move Rule 0 (Emergency comfort deficit bypass), Rule C / Hard Ambient Overshoot Ceiling cutoff, Stale Sensor Watchdog cutoff, and Rule E (Open window cutoff) outside the `if self._cur_temp is not None and self._outdoor_temp is not None:` block so they remain active even when `outdoor_sensor` is temporarily `unavailable`.
+- [ ] **[MAJOR - F-05] Harden Stale Sensor Watchdog Across Restarts & Cover Outdoor Sensor (`climate.py:491`, `climate.py:1426-1441`, `climate.py:1489-1503`) :**
+  - Persist `_cur_temp_ts` and `_outdoor_temp_ts` in the `Store` (updating timestamps on genuine sensor updates rather than trusting HA boot-time `last_updated` resets).
+  - Evaluate `_outdoor_temp_ts` in the watchdog or fall back cleanly when the outdoor sensor is stale.
+- [ ] **[MAJOR - F-09] Expose Smoothed Derivative `_derivative_smooth` in Companion Sensor & Diagnostics (`sensor.py:70`, `diagnostics.py:58`) :**
+  - Replace `t._temp_derivative` (raw unsmoothed Kalata velocity) with `t._derivative_smooth` (`tau_v = 1.0 h` low-pass filtered derivative) in `sensor.py` and `diagnostics.py` to match `climate.py:956`.
+- [ ] **[MAJOR - F-10] Fix Execution Order and Derivative Source in `_check_window_open_state` (`climate.py:1048-1049`, `climate.py:1268`, `climate.py:1281`, `climate.py:1505-1521`) :**
+  - Update `_temp_history` and the Kalata observer **before** calling `_check_window_open_state`, and use `_derivative_smooth` (or properly updated state) Consistently.
+- [ ] **[MAJOR - F-11] Expose Missing Configuration Keys in UI ConfigFlow & OptionsFlow (`config_flow.py:118-258`, `config_flow.py:299-664`) :**
+  - Add `CONF_ENFORCE_DAILY_QUOTA_SENSOR`, `CONF_WINDOW_DETECTION_SENSOR`, `CONF_COMFORT_TEMP`, `CONF_MIN_CYCLE_DURATION`, `CONF_MIN_OFF_CYCLE_DURATION`, and `CONF_MAX_CYCLES_PER_DAY` to the UI flows so UI-configured entries have full feature parity with YAML.
+- [ ] **[MAJOR - F-13] Remove Blocking Synchronous `open()` Call at Module Import Time (`const.py:8-18`) :**
+  - Replace the import-time `open("manifest.json")` call in `const.py` with a static `INTEGRATION_VERSION = "0.3.2"` constant verified against `manifest.json` via a unit test, eliminating Home Assistant 2024.6+ event-loop blocking I/O warnings.
+- [ ] **[MAJOR - F-14] Strengthen Unit Test Suite Against Mocking Blind Spots (`tests/test_fsm.py`, `tests/conftest.py`, `tests/test_config_flow.py`) :**
+  - Replace the standalone `MockDanfossFSM` in `tests/test_fsm.py` with tests against `PwmFloorHeatingThermostat`.
+  - Add an end-to-end `OptionsFlow` $\rightarrow$ `async_setup_entry` unit test verifying parameter units (`peak_max_run_duration`, `stagger_delay`), restart during `FSM_RUNNING_MIN_LOCK` with active reconciliation, and safety evaluation when `outdoor_sensor` is `None`.
 
 ---
 
-## 5. Companion Diagnostics & Predictive Lookahead (Completed in v0.3.1)
+## 3. Minor Improvements (Performance, Code Hygiene, CI & Packaging)
 
-- [x] **Next Transition Diagnostic Companion Sensor (`sensor.<zone>_next_transition`) :**
-  - Provisioned a dedicated 9th diagnostic sensor (`SensorDeviceClass.TIMESTAMP`) for each thermostat zone predicting the exact upcoming switch timestamp (`turn_on` or `turn_off`).
-  - Implemented thermodynamic lookahead logic in `climate.py` taking into account Danfoss compressor protections (30 min runtime, 15 min rest), off-peak precharge scheduling with zone stagger, thermal quota completion, peak run caps, and slab cooling trajectories.
-  - Surfaced rich attributes: `transition_type`, `transition_reason`, and `earliest_transition_time`.
-
-
+- [x] **[MINOR - F-15] Cache `weather.get_forecasts` Responses (`climate.py:1167-1227`, `climate.py:1575-1576`) :**
+  - Throttle `weather.get_forecasts` service calls with a 15-minute TTL cache (`WEATHER_FORECAST_CACHE_TTL_SECONDS = 900`, invalidated on `weather_entity` state change) instead of calling the service every 60 seconds per zone.
+- [x] **[MINOR - F-16] Clean Up Hardcoded Entity Names, Dead Code & Deprecated OptionsFlow Init (`climate.py`, `sensor.py`, `config_flow.py`) :**
+  - Replaced hardcoded French `input_datetime.heures_creuses_*` entity IDs with optional configurable `CONF_OFF_PEAK_START_ENTITY` (`off_peak_start_entity`) and `off_peak_sensor` attribute lookup.
+  - Removed dead `_handle_thermostat_update` in `sensor.py` and unused `async_dispatcher_send` in `climate.py`.
+  - Modernized `PwmFloorHeatingConfigFlow.async_get_options_flow` for Home Assistant 2024.11+ while preserving unit test compatibility.
+- [x] **[MINOR - F-17] Align Packaging Metadata & CI Workflows (`pyproject.toml:7`, `manifest.json:9`, `.github/workflows/release.yaml:10-12`, `.github/workflows/validate.yaml:56`) :**
+  - Synced `pyproject.toml` version (`0.3.2`) with `manifest.json`.
+  - Updated `iot_class` in `manifest.json` from `"local_push"` to `"calculated"`.
+  - Translated French input description in `.github/workflows/release.yaml` to English and added `voluptuous` to `.github/workflows/validate.yaml`.

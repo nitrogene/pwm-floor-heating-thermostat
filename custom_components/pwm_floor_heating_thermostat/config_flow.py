@@ -269,6 +269,8 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
+        if hasattr(config_entries.OptionsFlow, "config_entry"):
+            return PwmFloorHeatingOptionsFlowHandler()
         return PwmFloorHeatingOptionsFlowHandler(config_entry)
 
 

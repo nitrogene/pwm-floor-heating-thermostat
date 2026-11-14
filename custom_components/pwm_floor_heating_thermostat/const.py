@@ -24,6 +24,7 @@ CONF_HEATER = "heater"
 CONF_TARGET_SENSOR = "target_sensor"
 CONF_OUTDOOR_SENSOR = "outdoor_sensor"
 CONF_OFF_PEAK_SENSOR = "off_peak_sensor"
+CONF_OFF_PEAK_START_ENTITY = "off_peak_start_entity"
 CONF_HEURES_CREUSES_SENSOR = "heures_creuses_sensor"  # Alias for backward compatibility
 
 # Floor slab / hydronic loop sensor
@@ -62,6 +63,7 @@ CONF_WIND_SENSOR = "wind_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
 CONF_USE_WEATHER_FORECAST_AVERAGE = "use_weather_forecast_average"
 DEFAULT_USE_WEATHER_FORECAST_AVERAGE = False
+WEATHER_FORECAST_CACHE_TTL_SECONDS = 900  # 15 minutes cache for weather.get_forecasts
 
 # Compressor mechanical safeties (Danfoss)
 CONF_MIN_CYCLE_DURATION = "min_cycle_duration"
