@@ -33,6 +33,7 @@ from homeassistant.const import (
     ATTR_TEMPERATURE,
     CONF_NAME,
     CONF_UNIQUE_ID,
+    EVENT_HOMEASSISTANT_STOP,
     PRECISION_TENTHS,
     UnitOfTemperature,
 )
@@ -51,6 +52,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import dt as dt_util
 
@@ -181,6 +183,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
+STORAGE_SAVE_DELAY_SECONDS = 60.0
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -504,6 +509,108 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._next_transition_type: str = "none"
         self._next_transition_reason: str = "Model initializing"
         self._earliest_transition_time: datetime | None = None
+        self._state_store: Store[dict[str, Any]] | None = None
+
+    def _get_state_store(self) -> Store[dict[str, Any]]:
+        """Return the persistent JSON store for this thermostat instance."""
+        if self._state_store is None:
+            raw_id = self._unique_id or self._name.lower().replace(" ", "_")
+            safe_id = "".join(c if c.isalnum() or c in ("_", "-", ".") else "_" for c in raw_id)
+            self._state_store = Store(self.hass, STORAGE_VERSION, f"{DOMAIN}.{safe_id}")
+        return self._state_store
+
+    def _build_persisted_state(self) -> dict[str, Any]:
+        """Serialize internal histories and observer state for persistent storage."""
+        return {
+            "projection_history": [[t.isoformat(), v] for t, v in self._projection_history],
+            "model_error_history": [[t.isoformat(), v] for t, v in self._model_error_history],
+            "filtered_temp": self._filtered_temp,
+            "temp_derivative": self._temp_derivative,
+            "derivative_smooth": self._derivative_smooth,
+            "observer_last_update": self._observer_last_update.isoformat() if self._observer_last_update else None,
+            "heat_loss_samples_count": self._heat_loss_samples_count,
+            "heat_loss_measured_wk": self._heat_loss_measured_wk,
+            "dead_time_samples_count": self._dead_time_samples_count,
+            "dead_time_measured_hours": self._dead_time_measured_hours,
+        }
+
+    def _schedule_state_save(self) -> None:
+        """Schedule a debounced save of internal model state to disk."""
+        if self.hass is not None:
+            self._get_state_store().async_delay_save(self._build_persisted_state, STORAGE_SAVE_DELAY_SECONDS)
+
+    async def _async_save_state_now(self, _event: Any = None) -> None:
+        """Immediately flush internal model state to persistent storage."""
+        if self.hass is not None:
+            await self._get_state_store().async_save(self._build_persisted_state())
+
+    @staticmethod
+    def _parse_iso_history(raw_items: Any, cutoff: datetime) -> list[tuple[datetime, float]]:
+        """Parse and prune timestamped float history entries from JSON storage."""
+        parsed: list[tuple[datetime, float]] = []
+        if not isinstance(raw_items, list):
+            return parsed
+        for item in raw_items:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                continue
+            try:
+                ts = datetime.fromisoformat(str(item[0]))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                val = float(item[1])
+                if ts >= cutoff:
+                    parsed.append((ts, val))
+            except (ValueError, TypeError):
+                continue
+        return parsed
+
+    async def _async_restore_persisted_store(self) -> None:
+        """Restore internal histories and observer state from Home Assistant storage."""
+        if self.hass is None:
+            return
+        data = await self._get_state_store().async_load()
+        if not isinstance(data, dict):
+            return
+
+        now = dt_util.utcnow()
+        proj_cutoff = now - timedelta(hours=max(4.0, (self._effective_dead_time * 2.0) + 1.0))
+        rms_cutoff = now - timedelta(hours=24)
+
+        proj_hist = self._parse_iso_history(data.get("projection_history"), proj_cutoff)
+        if proj_hist:
+            self._projection_history = proj_hist
+
+        err_hist = self._parse_iso_history(data.get("model_error_history"), rms_cutoff)
+        if err_hist:
+            self._model_error_history = err_hist
+            sum_sq = sum(err ** 2 for _, err in self._model_error_history)
+            self._model_error_rms = round(math.sqrt(sum_sq / len(self._model_error_history)), 2)
+
+        for attr_name, key, caster in (
+            ("_filtered_temp", "filtered_temp", float),
+            ("_temp_derivative", "temp_derivative", float),
+            ("_derivative_smooth", "derivative_smooth", float),
+            ("_heat_loss_samples_count", "heat_loss_samples_count", int),
+            ("_heat_loss_measured_wk", "heat_loss_measured_wk", float),
+            ("_dead_time_samples_count", "dead_time_samples_count", int),
+            ("_dead_time_measured_hours", "dead_time_measured_hours", float),
+        ):
+            val = data.get(key)
+            if val is not None:
+                try:
+                    setattr(self, attr_name, caster(val))
+                except (ValueError, TypeError):
+                    pass
+
+        raw_obs_ts = data.get("observer_last_update")
+        if raw_obs_ts is not None:
+            try:
+                obs_ts = datetime.fromisoformat(str(raw_obs_ts))
+                if obs_ts.tzinfo is None:
+                    obs_ts = obs_ts.replace(tzinfo=UTC)
+                self._observer_last_update = obs_ts
+            except (ValueError, TypeError):
+                pass
 
     async def async_added_to_hass(self) -> None:
         """Register event listeners and restore previous state."""
@@ -549,12 +656,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             if "temp_projected_ahead" in old_attrs and old_attrs["temp_projected_ahead"] is not None:
                 try:
                     self._temp_projected = float(old_attrs["temp_projected_ahead"])
-                    self._filtered_temp = self._temp_projected
                 except (ValueError, TypeError):
                     pass
             if "heat_loss_measured_wk" in old_attrs and old_attrs["heat_loss_measured_wk"] is not None:
                 try:
                     self._heat_loss_measured_wk = float(old_attrs["heat_loss_measured_wk"])
+                except (ValueError, TypeError):
+                    pass
+            if "heat_loss_samples_count" in old_attrs and old_attrs["heat_loss_samples_count"] is not None:
+                try:
+                    self._heat_loss_samples_count = int(old_attrs["heat_loss_samples_count"])
                 except (ValueError, TypeError):
                     pass
             if "dead_time_measured_hours" in old_attrs and old_attrs["dead_time_measured_hours"] is not None:
@@ -595,6 +706,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._prev_day_energy_quota_kwh = float(old_attrs["energy_quota_24h_kwh"])
                 except (ValueError, TypeError):
                     pass
+
+        # Restore internal histories and observer state from self-contained HA Store
+        await self._async_restore_persisted_store()
+
+        # Flush internal state on Home Assistant shutdown
+        self.async_on_remove(
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_save_state_now)
+        )
 
         # Track state changes
         self.async_on_remove(
@@ -694,6 +813,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             _async_startup()
         else:
             self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_startup)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Persist internal model state before entity removal or reload."""
+        await self._async_save_state_now()
+        await super().async_will_remove_from_hass()
 
     @property
     def unique_id(self) -> str | None:
@@ -1289,6 +1413,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._model_error_rms = round(
                     math.sqrt(sum_sq / len(self._model_error_history)), 2
                 )
+
+        self._schedule_state_save()
 
     def _async_read_sensors(self) -> None:
         """Synchronize states from configured sensors."""

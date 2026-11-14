@@ -23,6 +23,7 @@ ha_modules = [
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.event",
     "homeassistant.helpers.restore_state",
+    "homeassistant.helpers.storage",
     "homeassistant.helpers.typing",
     "homeassistant.helpers.selector",
     "homeassistant.helpers.device_registry",
@@ -90,6 +91,9 @@ class MockEntity:
     async def async_added_to_hass(self):
         pass
 
+    async def async_will_remove_from_hass(self):
+        pass
+
     def async_write_ha_state(self):
         pass
 
@@ -151,9 +155,35 @@ class MockRestoreEntity(MockEntity):
         return None
 
 
+class MockStore:
+    """In-memory mock of homeassistant.helpers.storage.Store."""
+
+    _backing: dict[tuple[int, str], Any] = {}
+
+    def __init__(self, hass, version: int, key: str):
+        self.hass = hass
+        self.version = version
+        self.key = key
+
+    def __class_getitem__(cls, item):
+        return cls
+
+    async def async_load(self) -> Any:
+        return self._backing.get((id(self.hass), self.key))
+
+    async def async_save(self, data: Any) -> None:
+        self._backing[(id(self.hass), self.key)] = data
+
+    def async_delay_save(self, data_func, delay: float = 0) -> None:
+        self._backing[(id(self.hass), self.key)] = data_func()
+
+
 import homeassistant.components.climate as climate_mod  # noqa: E402
 import homeassistant.components.sensor as sensor_mod  # noqa: E402
 import homeassistant.helpers.restore_state as restore_mod  # noqa: E402
+import homeassistant.helpers.storage as storage_mod  # noqa: E402
+
+storage_mod.Store = MockStore
 
 climate_mod.ClimateEntity = MockClimateEntity
 climate_mod.PLATFORM_SCHEMA = MagicMock()
