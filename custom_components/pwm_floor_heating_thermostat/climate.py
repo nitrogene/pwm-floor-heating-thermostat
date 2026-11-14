@@ -170,7 +170,9 @@ from .const import (
     FSM_RUNNING_NORMAL,
     FSM_WAITING_MIN_OFF,
     INTEGRATION_VERSION,
+    MAX_RULE_B_THRESHOLD,
     MAX_UNSERVED_QUOTA_CARRYOVER_HOURS,
+    MIN_HEAT_LOSS_RATIO,
     MIN_HEAT_LOSS_WK,
     POST_AIRING_MAX_DERIVATIVE,
     POST_AIRING_RECOVERY_MINUTES,
@@ -401,8 +403,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._dead_time = float(config.get(CONF_DEAD_TIME, DEFAULT_DEAD_TIME_HOURS))
 
         # Danfoss compressor safeties
-        self._min_cycle_duration = _parse_timedelta(config.get(CONF_MIN_CYCLE_DURATION), DEFAULT_MIN_CYCLE)
-        self._min_off_duration = _parse_timedelta(config.get(CONF_MIN_OFF_CYCLE_DURATION), DEFAULT_MIN_OFF)
+        self._min_cycle_duration = _parse_timedelta(
+            config.get(CONF_MIN_CYCLE_DURATION), DEFAULT_MIN_CYCLE, numeric_unit="minutes"
+        )
+        self._min_off_duration = _parse_timedelta(
+            config.get(CONF_MIN_OFF_CYCLE_DURATION), DEFAULT_MIN_OFF, numeric_unit="minutes"
+        )
         self._max_cycles = int(config.get(CONF_MAX_CYCLES_PER_DAY, DEFAULT_MAX_CYCLES))
         self._peak_max_run_duration = _parse_timedelta(
             config.get(CONF_PEAK_MAX_RUN_DURATION),
@@ -522,6 +528,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Stale sensor watchdog & hardware safety guards
         self._cur_temp_ts: datetime | None = None
         self._outdoor_temp_ts: datetime | None = None
+        self._outdoor_sensor_stale: bool = False
+        self._last_heat_loss_sample_ts: datetime | None = None
         self._sensor_stale: bool = False
         self._sensor_stale_timeout_minutes: int = int(
             config.get(CONF_SENSOR_STALE_TIMEOUT_MINUTES, DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES)
@@ -567,6 +575,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "temp_derivative": self._temp_derivative,
             "derivative_smooth": self._derivative_smooth,
             "observer_last_update": self._observer_last_update.isoformat() if self._observer_last_update else None,
+            "cur_temp_ts": self._cur_temp_ts.isoformat() if self._cur_temp_ts else None,
+            "outdoor_temp_ts": self._outdoor_temp_ts.isoformat() if self._outdoor_temp_ts else None,
+            "last_heat_loss_sample_ts": (
+                self._last_heat_loss_sample_ts.isoformat() if self._last_heat_loss_sample_ts else None
+            ),
             "heat_loss_samples_count": self._heat_loss_samples_count,
             "heat_loss_measured_wk": self._heat_loss_measured_wk,
             "dead_time_samples_count": self._dead_time_samples_count,
@@ -645,6 +658,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ("_observer_last_update", "observer_last_update"),
             ("_last_state_change", "last_state_change"),
             ("_cycle_start_time", "cycle_start_time"),
+            ("_cur_temp_ts", "cur_temp_ts"),
+            ("_outdoor_temp_ts", "outdoor_temp_ts"),
+            ("_last_heat_loss_sample_ts", "last_heat_loss_sample_ts"),
         ):
             raw_ts = data.get(key)
             if raw_ts is not None:
@@ -1136,8 +1152,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             now_utc = dt_util.utcnow()
             lu = getattr(new_state, "last_updated", None)
             self._cur_temp_ts = lu if isinstance(lu, datetime) else now_utc
-            self._check_window_open_state(now_utc)
             self._update_trajectory_projection(now_utc)
+            self._check_window_open_state(now_utc)
+            self._schedule_state_save()
             self.async_write_ha_state()
         except (ValueError, TypeError):
             pass
@@ -1152,6 +1169,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._outdoor_temp = float(new_state.state)
             lu = getattr(new_state, "last_updated", None)
             self._outdoor_temp_ts = lu if isinstance(lu, datetime) else dt_util.utcnow()
+            self._schedule_state_save()
             self.async_write_ha_state()
         except (ValueError, TypeError):
             pass
@@ -1414,7 +1432,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 elif not self._window_open:
                     self._window_open_time = None
         else:
-            # Automatic thermal drop detection
+            # Automatic thermal drop detection (using smoothed derivative _derivative_smooth)
             if self._window_open:
                 if self._window_open_time and (now_utc - self._window_open_time) >= self._window_timeout:
                     _LOGGER.info(
@@ -1423,10 +1441,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     )
                     self._window_open = False
                     self._window_open_time = None
-                elif self._temp_derivative > 0.2:
+                elif self._derivative_smooth > 0.2:
                     _LOGGER.info(
                         "Window closed: temperature recovery observed (+%.2f°C/h). Resuming operation.",
-                        self._temp_derivative,
+                        self._derivative_smooth,
                     )
                     self._window_open = False
                     self._window_open_time = None
@@ -1436,13 +1454,15 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 if recent_temps and self._cur_temp is not None:
                     max_recent = max(recent_temps)
                     drop = max_recent - self._cur_temp
-                    if drop >= self._window_drop_threshold or (self._temp_derivative <= WINDOW_DERIVATIVE_THRESHOLD and drop >= 0.2):
+                    if drop >= self._window_drop_threshold or (
+                        self._derivative_smooth <= WINDOW_DERIVATIVE_THRESHOLD and drop >= 0.2
+                    ):
                         self._window_open = True
                         self._window_open_time = now_utc
                         _LOGGER.warning(
                             "Rapid thermal drop detected (drop %.2f°C in <= 15 min, slope %.2f°C/h). Suspending heating.",
                             drop,
-                            self._temp_derivative,
+                            self._derivative_smooth,
                         )
 
     def _update_trajectory_projection(self, now: datetime) -> None:
@@ -1557,7 +1577,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         if past_proj is not None:
             self._model_error = round(self._cur_temp - past_proj, 2)
-            self._model_error_history.append((now, self._model_error))
+            # Only accumulate RMS history during passive cooling / resting regimes to avoid
+            # inflating Rule B threshold during active heating or solar gain ramps (F-08)
+            if self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF] and self._derivative_smooth <= 0.05:
+                self._model_error_history.append((now, self._model_error))
 
             # Prune error history to rolling 24-hour window
             cutoff_rms = now - timedelta(hours=24)
@@ -1584,6 +1607,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 if self._cur_temp_ts is None:
                     lu = getattr(st_in, "last_updated", None)
                     self._cur_temp_ts = lu if isinstance(lu, datetime) else now_utc
+                self._update_trajectory_projection(now_utc)
                 self._check_window_open_state(now_utc)
             except (ValueError, TypeError):
                 pass
@@ -1643,8 +1667,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._fsm_state == FSM_WAITING_MIN_OFF and elapsed >= self._min_off_duration.total_seconds():
             self._fsm_state = FSM_IDLE
 
-        # Check Stale Sensor Watchdog
+        # Check Stale Sensor Watchdog (Indoor & Outdoor)
         self._sensor_stale = False
+        self._outdoor_sensor_stale = False
         if self._sensor_stale_timeout_minutes > 0:
             if self._cur_temp_ts is None and self._target_sensor:
                 st_target = self.hass.states.get(self._target_sensor)
@@ -1659,10 +1684,20 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 ):
                     self._sensor_stale = True
 
-        # 1. Evaluate ventilation / window open state
-        self._check_window_open_state(now_utc)
+            if self._outdoor_temp_ts is None and self._outdoor_sensor:
+                st_out = self.hass.states.get(self._outdoor_sensor)
+                if st_out:
+                    lu_out = getattr(st_out, "last_updated", None)
+                    if isinstance(lu_out, datetime):
+                        self._outdoor_temp_ts = lu_out
+            if self._outdoor_temp_ts is not None and isinstance(self._outdoor_temp_ts, datetime):
+                elapsed_out_sec = (now_utc - self._outdoor_temp_ts).total_seconds()
+                if isinstance(elapsed_out_sec, (int, float)) and elapsed_out_sec >= (
+                    self._sensor_stale_timeout_minutes * 60
+                ):
+                    self._outdoor_sensor_stale = True
 
-        # 2. Evaluate effective dead time theta (Soft Self-Adaptation)
+        # 1. Evaluate effective dead time theta (Soft Self-Adaptation)
         self._effective_dead_time = self._dead_time
         if (
             self._auto_calibrate_dead_time
@@ -1675,8 +1710,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 max(min_d, min(max_d, self._dead_time_measured_hours)), 2
             )
 
-        # 3. Update state observer and slab trajectory projection at t + theta_effective
+        # 2. Update state observer and slab trajectory projection at t + theta_effective
         self._update_trajectory_projection(now_utc)
+
+        # 3. Evaluate ventilation / window open state (using updated _temp_history and _derivative_smooth)
+        self._check_window_open_state(now_utc)
 
         # 4. Mode B Soft Self-Adaptation: evaluate effective heat loss H
         self._effective_heat_loss = self._heat_loss
@@ -1686,9 +1724,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             and self._heat_loss_samples_count >= AUTO_CALIBRATE_MIN_SAMPLES
         ):
             if self._heat_loss_samples_count >= self._heat_loss_confidence_samples:
-                # Direct unconstrained application once statistical confidence is reached
+                # Enforce realistic lower bound (>= 50% of configured baseline H, and >= MIN_HEAT_LOSS_WK)
+                min_h_floor = max(MIN_HEAT_LOSS_WK, round(MIN_HEAT_LOSS_RATIO * self._heat_loss, 1))
                 self._effective_heat_loss = round(
-                    max(MIN_HEAT_LOSS_WK, self._heat_loss_measured_wk), 1
+                    max(min_h_floor, self._heat_loss_measured_wk), 1
                 )
             else:
                 # Soft progressive adaptation (clamped within +/-20% of baseline)
@@ -1807,13 +1846,19 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         # 5. Model-based predictive scheduling strategy
         should_heat = False
+        outdoor_ref = (
+            self._outdoor_temp
+            if (self._outdoor_temp is not None and not self._outdoor_sensor_stale)
+            else effective_outdoor
+        )
 
-        if self._cur_temp is not None and self._outdoor_temp is not None:
+        if self._cur_temp is not None:
             error = self._target_temp - self._cur_temp
             proj_val = self._temp_projected if self._temp_projected is not None else self._cur_temp
             projected_error = self._target_temp - proj_val
 
-            # Rule 0: Emergency comfort deficit bypass (unconditional heating if room falls >= 1.5°C below target)
+            # Rule 0: Emergency comfort deficit bypass (unconditional heating if room falls >= 1.5°C below target,
+            # independent of outdoor sensor availability - F-04)
             if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE:
                 should_heat = True
                 self._decision_reason = (
@@ -1821,19 +1866,22 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"{EMERGENCY_COMFORT_DEFICIT_OVERRIDE}°C (quota bypassed)"
                 )
             # Rule A: Priority thermal precharge during Off-Peak hours
-            elif off_peak_active:
-                if error >= -0.5 and self._outdoor_temp <= self._outdoor_precharge_max_temp:
+            elif off_peak_active and outdoor_ref is not None:
+                if error >= -0.5 and outdoor_ref <= self._outdoor_precharge_max_temp:
                     should_heat = True
                     self._decision_reason = (
-                        f"Off-peak thermal precharge (ext: {self._outdoor_temp}°C, "
+                        f"Off-peak thermal precharge (ext: {outdoor_ref}°C, "
                         f"curr: {self._cur_temp}°C, proj: {round(proj_val, 2)}°C in {self._dead_time}h)"
                     )
             # Rule B: Peak hours heating only on anticipated trajectory drop
-            else:
+            elif not off_peak_active and outdoor_ref is not None:
                 effective_rms = self._model_error_rms if self._model_error_rms is not None else 0.10
-                rule_b_threshold = max(
-                    self._rule_b_min_threshold,
-                    round(2.0 * effective_rms, 2),
+                rule_b_threshold = min(
+                    MAX_RULE_B_THRESHOLD,
+                    max(
+                        self._rule_b_min_threshold,
+                        round(2.0 * effective_rms, 2),
+                    ),
                 )
                 self._current_rule_b_threshold = rule_b_threshold
 
@@ -1866,19 +1914,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"target {self._target_temp}°C + {self._hard_overshoot_margin}°C"
                 )
 
-            # Stale Sensor Watchdog Fail-Safe cutoff
-            if self._sensor_stale:
-                should_heat = False
-                stale_min = (
-                    int((now_utc - self._cur_temp_ts).total_seconds() // 60)
-                    if self._cur_temp_ts
-                    else self._sensor_stale_timeout_minutes
-                )
-                self._decision_reason = (
-                    f"Fail-safe shutdown: ambient sensor stale for {stale_min} min "
-                    f"(timeout: {self._sensor_stale_timeout_minutes} min)"
-                )
-
             # Rule D: Daily thermal quota enforcement during Peak hours
             quota_enforcement_active = self._enforce_daily_quota
             if self._enforce_daily_quota_sensor:
@@ -1899,10 +1934,23 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                         f"Peak-hour cycle inhibited by quota enforcement (switch ON)."
                     )
 
-            # Rule E: Open window / ventilation detection
-            if self._window_open:
-                should_heat = False
-                self._decision_reason = "Open window / ventilation detected. Heating suspended."
+        # Stale Sensor Watchdog Fail-Safe cutoff (unconditional even if outdoor sensor is unavailable - F-04)
+        if self._sensor_stale:
+            should_heat = False
+            stale_min = (
+                int((now_utc - self._cur_temp_ts).total_seconds() // 60)
+                if self._cur_temp_ts
+                else self._sensor_stale_timeout_minutes
+            )
+            self._decision_reason = (
+                f"Fail-safe shutdown: ambient sensor stale for {stale_min} min "
+                f"(timeout: {self._sensor_stale_timeout_minutes} min)"
+            )
+
+        # Rule E: Open window / ventilation detection (unconditional - F-04)
+        if self._window_open:
+            should_heat = False
+            self._decision_reason = "Open window / ventilation detected. Heating suspended."
 
         # Rule F: Multi-Zone startup staggering
         stagger_remaining_sec = 0
@@ -2003,9 +2051,18 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         else:
             await self._async_stop_heating_safe()
 
-        # 8. Passive continuous calibration of heat loss factor (Mode A)
+        # 8. Passive continuous calibration of heat loss factor (Mode A - Night-time cooling only, F-07)
+        local_hour = dt_util.now().hour
+        is_night_window = local_hour >= 23 or local_hour < 6
+        sample_throttled = (
+            self._last_heat_loss_sample_ts is not None
+            and (now_utc - self._last_heat_loss_sample_ts).total_seconds() < 3600.0
+        )
         if (
-            self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]
+            is_night_window
+            and not sample_throttled
+            and self._solar_credit_kwh == 0.0
+            and self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]
             and not self._window_open
             and self._cur_temp is not None
             and self._outdoor_temp is not None
@@ -2029,6 +2086,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                             0.98 * self._heat_loss_measured_wk + 0.02 * sample_ua, 1
                         )
                     self._heat_loss_samples_count += 1
+                    self._last_heat_loss_sample_ts = now_utc
+                    self._schedule_state_save()
 
         # 9. Experimental identification of slab transport dead time theta (inflection point)
         if (

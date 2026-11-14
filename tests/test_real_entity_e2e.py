@@ -211,12 +211,20 @@ def test_e2e_mode_b_unconstrained_transition(mock_hass, base_config):
         assert thermostat._effective_heat_loss == 12.0
         assert thermostat.extra_state_attributes[ATTR_EFFECTIVE_HEAT_LOSS_WK] == 12.0
 
-        # Stage 2: 12 samples (>= 10) -> Unconstrained direct adoption = 7.0 W/K
+        # Stage 2: 12 samples (>= 10) -> Clamped to 50% safety floor (0.5 * 15.0 = 7.5 W/K, F-07)
         thermostat._heat_loss_samples_count = 12
         with patch("homeassistant.util.dt.utcnow", return_value=t0):
             await thermostat._async_control_heating(now=t0)
 
-        assert thermostat._effective_heat_loss == 7.0
-        assert thermostat.extra_state_attributes[ATTR_EFFECTIVE_HEAT_LOSS_WK] == 7.0
+        assert thermostat._effective_heat_loss == 7.5
+        assert thermostat.extra_state_attributes[ATTR_EFFECTIVE_HEAT_LOSS_WK] == 7.5
+
+        # Stage 3: 12 samples with measured = 9.0 W/K (>= 7.5 floor) -> Direct adoption = 9.0 W/K
+        thermostat._heat_loss_measured_wk = 9.0
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+
+        assert thermostat._effective_heat_loss == 9.0
+        assert thermostat.extra_state_attributes[ATTR_EFFECTIVE_HEAT_LOSS_WK] == 9.0
 
     asyncio.run(_test())

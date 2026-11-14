@@ -67,9 +67,13 @@ SENSOR_TYPES: tuple[PwmSensorEntityDescription, ...] = (
         native_unit_of_measurement=f"{UnitOfTemperature.CELSIUS}/h",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda t: round(t._temp_derivative, 3)
-        if hasattr(t, "_temp_derivative") and t._temp_derivative is not None
-        else None,
+        value_fn=lambda t: round(t._derivative_smooth, 3)
+        if hasattr(t, "_derivative_smooth") and isinstance(t._derivative_smooth, int | float)
+        else (
+            round(t._temp_derivative, 3)
+            if hasattr(t, "_temp_derivative") and isinstance(t._temp_derivative, int | float)
+            else None
+        ),
     ),
     PwmSensorEntityDescription(
         key="model_error",

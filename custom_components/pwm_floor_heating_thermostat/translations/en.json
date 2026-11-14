@@ -27,7 +27,13 @@
           "sensor_stale_timeout_minutes": "Ambient Sensor Stale Timeout / Watchdog (minutes)",
           "max_continuous_run_minutes": "Global Maximum Continuous Run Duration (minutes)",
           "thermal_runaway_derivative": "Thermal Runaway Derivative Cutoff (°C/h)",
-          "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)"
+          "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)",
+          "comfort_temp": "Comfort Preset Temperature (°C)",
+          "enforce_daily_quota_sensor": "Daily Quota Override Switch / Sensor",
+          "window_detection_sensor": "Window Detection Master Switch / Sensor",
+          "min_cycle_duration": "Minimum Compressor Runtime Lock (minutes)",
+          "min_off_cycle_duration": "Minimum Compressor Rest Lock (minutes)",
+          "max_cycles_per_day": "Maximum Compressor Cycles Budget per Day"
         }
       }
     },
@@ -77,7 +83,13 @@
           "sensor_stale_timeout_minutes": "Ambient Sensor Stale Timeout / Watchdog (minutes)",
           "max_continuous_run_minutes": "Global Maximum Continuous Run Duration (minutes)",
           "thermal_runaway_derivative": "Thermal Runaway Derivative Cutoff (°C/h)",
-          "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)"
+          "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)",
+          "comfort_temp": "Comfort Preset Temperature (°C)",
+          "enforce_daily_quota_sensor": "Daily Quota Override Switch / Sensor",
+          "window_detection_sensor": "Window Detection Master Switch / Sensor",
+          "min_cycle_duration": "Minimum Compressor Runtime Lock (minutes)",
+          "min_off_cycle_duration": "Minimum Compressor Rest Lock (minutes)",
+          "max_cycles_per_day": "Maximum Compressor Cycles Budget per Day"
         }
       }
     }

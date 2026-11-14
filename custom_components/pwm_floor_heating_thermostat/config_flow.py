@@ -22,10 +22,12 @@ from .const import (
     CONF_AUTO_CALIBRATE_HEAT_LOSS,
     CONF_AWAY_TEMP,
     CONF_COMFORT_SAFETY_DEFICIT,
+    CONF_COMFORT_TEMP,
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
     CONF_ECO_TEMP,
     CONF_ENFORCE_DAILY_QUOTA,
+    CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HARD_OVERSHOOT_MARGIN,
     CONF_HEAT_LOSS,
@@ -33,8 +35,11 @@ from .const import (
     CONF_HEATER,
     CONF_KALATA_PROCESS_NOISE,
     CONF_MAX_CONTINUOUS_RUN_MINUTES,
+    CONF_MAX_CYCLES_PER_DAY,
     CONF_MAX_FLOOR_TEMP,
+    CONF_MIN_CYCLE_DURATION,
     CONF_MIN_FLOOR_TEMP,
+    CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
     CONF_OFF_PEAK_SENSOR,
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
@@ -52,6 +57,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
+    CONF_WINDOW_DETECTION_SENSOR,
     CONF_WINDOW_SENSOR,
     DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
     DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
@@ -66,6 +72,7 @@ from .const import (
     DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
     DEFAULT_KALATA_PROCESS_NOISE,
     DEFAULT_MAX_CONTINUOUS_RUN_MINUTES,
+    DEFAULT_MAX_CYCLES,
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_NAME,
@@ -74,6 +81,7 @@ from .const import (
     DEFAULT_RULE_B_MIN_THRESHOLD,
     DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
     DEFAULT_SLAB_TAU_HOURS,
+    DEFAULT_TARGET_TEMP,
     DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
     DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
@@ -254,6 +262,60 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(
+                    CONF_COMFORT_TEMP,
+                    default=DEFAULT_TARGET_TEMP,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=15.0,
+                        max=25.0,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(CONF_ENFORCE_DAILY_QUOTA_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
+                ),
+                vol.Optional(CONF_WINDOW_DETECTION_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
+                ),
+                vol.Optional(
+                    CONF_MIN_CYCLE_DURATION,
+                    default=30,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5,
+                        max=120,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_OFF_CYCLE_DURATION,
+                    default=15,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5,
+                        max=60,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_CYCLES_PER_DAY,
+                    default=DEFAULT_MAX_CYCLES,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=24,
+                        step=1,
+                        unit_of_measurement="cycles/day",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
@@ -368,15 +430,39 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_ENFORCE_DAILY_QUOTA,
                     default=bool(curr.get(CONF_ENFORCE_DAILY_QUOTA, DEFAULT_ENFORCE_DAILY_QUOTA)),
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENFORCE_DAILY_QUOTA_SENSOR,
+                    description={"suggested_value": curr.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
+                ),
                 vol.Required(
                     CONF_WINDOW_DETECTION,
                     default=bool(curr.get(CONF_WINDOW_DETECTION, DEFAULT_WINDOW_DETECTION)),
                 ): selector.BooleanSelector(),
                 vol.Optional(
+                    CONF_WINDOW_DETECTION_SENSOR,
+                    description={"suggested_value": curr.get(CONF_WINDOW_DETECTION_SENSOR)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
+                ),
+                vol.Optional(
                     CONF_WINDOW_SENSOR,
                     description={"suggested_value": curr.get(CONF_WINDOW_SENSOR)},
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
+                ),
+                vol.Required(
+                    CONF_COMFORT_TEMP,
+                    default=float(curr.get(CONF_COMFORT_TEMP, DEFAULT_TARGET_TEMP)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=15.0,
+                        max=25.0,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 ),
                 vol.Required(
                     CONF_ECO_TEMP,
@@ -659,6 +745,55 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         max=2.5,
                         step=0.1,
                         unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_CYCLE_DURATION,
+                    default=int(
+                        curr.get(CONF_MIN_CYCLE_DURATION, 30)
+                        if isinstance(curr.get(CONF_MIN_CYCLE_DURATION), (int, float))
+                        else 30
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5,
+                        max=120,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_OFF_CYCLE_DURATION,
+                    default=int(
+                        curr.get(CONF_MIN_OFF_CYCLE_DURATION, 15)
+                        if isinstance(curr.get(CONF_MIN_OFF_CYCLE_DURATION), (int, float))
+                        else 15
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5,
+                        max=60,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_MAX_CYCLES_PER_DAY,
+                    default=int(
+                        curr.get(
+                            CONF_MAX_CYCLES_PER_DAY,
+                            DEFAULT_MAX_CYCLES,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=24,
+                        step=1,
+                        unit_of_measurement="cycles/day",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),

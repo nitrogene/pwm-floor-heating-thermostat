@@ -28,7 +28,13 @@
           "sensor_stale_timeout_minutes": "Délai d'inactivité de la sonde ambiante / Watchdog (minutes)",
           "max_continuous_run_minutes": "Durée maximale de marche continue globale (minutes)",
           "thermal_runaway_derivative": "Seuil de dérivée d'emballement thermique (°C/h)",
-          "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)"
+          "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)",
+          "comfort_temp": "Température consigne Confort (°C)",
+          "enforce_daily_quota_sensor": "Interrupteur / Capteur d'activation du quota journalier",
+          "window_detection_sensor": "Interrupteur / Capteur d'activation de la détection d'aération",
+          "min_cycle_duration": "Durée minimale de marche compresseur (minutes)",
+          "min_off_cycle_duration": "Durée minimale de repos compresseur (minutes)",
+          "max_cycles_per_day": "Budget maximal de cycles compresseur par jour"
         }
       }
     },
@@ -78,7 +84,13 @@
           "sensor_stale_timeout_minutes": "Délai d'inactivité de la sonde ambiante / Watchdog (minutes)",
           "max_continuous_run_minutes": "Durée maximale de marche continue globale (minutes)",
           "thermal_runaway_derivative": "Seuil de dérivée d'emballement thermique (°C/h)",
-          "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)"
+          "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)",
+          "comfort_temp": "Température consigne Confort (°C)",
+          "enforce_daily_quota_sensor": "Interrupteur / Capteur d'activation du quota journalier",
+          "window_detection_sensor": "Interrupteur / Capteur d'activation de la détection d'aération",
+          "min_cycle_duration": "Durée minimale de marche compresseur (minutes)",
+          "min_off_cycle_duration": "Durée minimale de repos compresseur (minutes)",
+          "max_cycles_per_day": "Budget maximal de cycles compresseur par jour"
         }
       }
     }

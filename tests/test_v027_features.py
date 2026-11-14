@@ -25,9 +25,19 @@ from custom_components.pwm_floor_heating_thermostat.const import (
 
 
 def test_dynamic_version_resolution():
-    """Verify integration version is resolved dynamically from manifest.json."""
+    """Verify static integration version matches manifest.json without blocking import I/O (F-13)."""
+    import json
+    from pathlib import Path
+
+    manifest_path = (
+        Path(__file__).resolve().parent.parent
+        / "custom_components"
+        / "pwm_floor_heating_thermostat"
+        / "manifest.json"
+    )
+    manifest_version = json.loads(manifest_path.read_text(encoding="utf-8"))["version"]
     version = get_integration_version()
-    assert version == "0.3.3"
+    assert version == manifest_version
 
 
 def test_trajectory_projection_deduplication():

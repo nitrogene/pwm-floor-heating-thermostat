@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.4] - 2026-11-14
+
+### Added
+- **Full UI ConfigFlow & OptionsFlow Feature Parity (`F-11`)**:
+  - Exposed `comfort_temp`, `enforce_daily_quota_sensor`, `window_detection_sensor`, `min_cycle_duration`, `min_off_cycle_duration`, and `max_cycles_per_day` in both `ConfigFlow` and `OptionsFlow` with full English and French translations.
+- **Persistent Sensor Watchdog Timestamps & Outdoor Sensor Coverage (`F-05`)**:
+  - Persists `cur_temp_ts`, `outdoor_temp_ts`, and `last_heat_loss_sample_ts` in the Home Assistant `Store` so stale sensor detection survives restarts and config reloads without being masked by boot-time `last_updated` resets.
+  - Evaluates outdoor sensor staleness and falls back cleanly to the rolling 24h weather forecast when the outdoor sensor is stale.
+- **Real-Entity FSM & Safety Unit Tests (`F-14`)**:
+  - Replaced standalone `MockDanfossFSM` in `tests/test_fsm.py` with tests exercising `PwmFloorHeatingThermostat` directly, plus dedicated tests for `F-04`, `F-07`, and `F-13` (90 unit tests passing).
+
+### Changed
+- **Kalata Process Noise Default & Import-Time I/O Removal (`F-08`, `F-13`)**:
+  - Lowered `DEFAULT_KALATA_PROCESS_NOISE` from `0.005` to `0.001` `(°C/h)²/h`.
+  - Replaced synchronous `open("manifest.json")` at module import time in `const.py` with a static `INTEGRATION_VERSION = "0.3.4"` verified against `manifest.json` by unit test, eliminating Home Assistant 2024.6+ event-loop blocking I/O warnings.
+- Bumped integration version to `0.3.4` in `manifest.json` and `pyproject.toml`.
+
+### Fixed
+- **Mode A / Mode B Heat Loss ($H$) Downward Drift Prevention (`F-07`)**:
+  - Restricted passive Mode A heat loss sampling to genuine night-time cooling windows (`23:00–06:00` local time with zero solar credit), throttled sample counting to at most 1 sample per hour, and enforced a minimum safety floor of `50%` of configured baseline $H$ (`MIN_HEAT_LOSS_RATIO = 0.50`) in Mode B even after `heat_loss_confidence_samples` is reached.
+- **Rule B Anticipation Threshold Cap & Passive-Regime RMS Accumulation (`F-08`)**:
+  - Restricted `_model_error_history` accumulation to passive cooling/resting regimes (`FSM_IDLE` / `FSM_WAITING_MIN_OFF` and `derivative_smooth <= 0.05`) and capped `rule_b_threshold` at `0.60°C` (`MAX_RULE_B_THRESHOLD`), preventing positive-slope heating or solar ramps from paralyzing Peak-Hour dead-time anticipation.
+- **Decoupled Safety Guards from Outdoor Sensor Availability (`F-04`)**:
+  - Moved Rule 0 (Emergency comfort deficit bypass), Rule C (Overshoot prevention), Hard Ambient Overshoot Ceiling, Stale Sensor Watchdog, and Rule E (Open window cutoff) outside the `outdoor_temp is not None` requirement so they remain unconditionally active even if the outdoor sensor becomes `unavailable`.
+- **Smoothed Derivative Consistency & Window Detection Execution Order (`F-09`, `F-10`)**:
+  - Exposed `_derivative_smooth` in `sensor.<zone>_temp_derivative_hourly` and `diagnostics.py` to match `climate.py`.
+  - Updated `_temp_history` and the Kalata state observer before evaluating `_check_window_open_state()`, using `_derivative_smooth` consistently for ventilation detection and recovery.
+
+---
+
 ## [0.3.3] - 2026-11-14
 
 ### Added

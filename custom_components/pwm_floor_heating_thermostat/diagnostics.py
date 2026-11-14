@@ -55,7 +55,11 @@ async def async_get_config_entry_diagnostics(
             "outdoor_temperature": getattr(thermostat, "_outdoor_temp", None),
             "floor_temperature": getattr(thermostat, "_floor_temp", None),
             "decision_reason": getattr(thermostat, "_decision_reason", None),
-            "temp_derivative_hourly": getattr(thermostat, "_temp_derivative", None),
+            "temp_derivative_hourly": (
+                getattr(thermostat, "_derivative_smooth", None)
+                if isinstance(getattr(thermostat, "_derivative_smooth", None), int | float)
+                else getattr(thermostat, "_temp_derivative", None)
+            ),
             "temp_projected_ahead": getattr(thermostat, "_temp_projected", None),
             "dead_time_hours": getattr(thermostat, "_dead_time", None),
             "effective_dead_time_hours": getattr(thermostat, "_effective_dead_time", None),

@@ -22,26 +22,26 @@ All items are strictly ordered from **most critical to least critical**.
 
 ## 2. Major Fixes (Thermodynamic Model, Safeties & Home Assistant Integration)
 
-- [ ] **[MAJOR - F-07] Fix Mode A / Mode B Heat Loss ($H$) Auto-Calibration Downward Drift (`climate.py:1525-1541`, `climate.py:1848-1873`) :**
+- [x] **[MAJOR - F-07] Fix Mode A / Mode B Heat Loss ($H$) Auto-Calibration Downward Drift (`climate.py:1525-1541`, `climate.py:1848-1873`) :**
   - `_heat_loss_samples_count` is currently incremented every minute during `_async_control_heating` whenever `_derivative_smooth < -0.05`, including daytime periods with solar or internal heat gains. This reaches `heat_loss_confidence_samples` (10) within 10 minutes and unlocks unconstrained downward drift to `0.5 W/K`.
   - Restrict Mode A sampling to genuine night-time cooling windows (e.g. 23:00–06:00 local time, zero solar irradiance), throttle sample counting to at most 1 sample per hour (or 1 consolidated sample per night), and enforce a realistic lower safety bound (e.g. `>= 0.5 * self._heat_loss`) even after `heat_loss_confidence_samples` is reached.
-- [ ] **[MAJOR - F-08] Prevent Rule B Anticipation Paralysis from Positive-Slope Projection Errors (`climate.py:1376`, `climate.py:1401-1415`, `climate.py:1675-1688`, `const.py:51`) :**
+- [x] **[MAJOR - F-08] Prevent Rule B Anticipation Paralysis from Positive-Slope Projection Errors (`climate.py:1376`, `climate.py:1401-1415`, `climate.py:1675-1688`, `const.py:51`) :**
   - Linear tangent extrapolation over `dead_time` during solar gains or active heating inflates `model_error_rms`, pushing `rule_b_threshold = 2.0 * RMS` above `1.1°C–2.5°C` and completely disabling Peak-Hour dead-time anticipation.
   - Lower `DEFAULT_KALATA_PROCESS_NOISE` from `0.005` to `0.001`, restrict `_model_error_history` accumulation to passive cooling regimes (or cap `rule_b_threshold` at a sane ceiling such as `0.6°C`).
-- [ ] **[MAJOR - F-04] Decouple Safety Guards from Outdoor Sensor Availability (`climate.py:1653-1748`) :**
+- [x] **[MAJOR - F-04] Decouple Safety Guards from Outdoor Sensor Availability (`climate.py:1653-1748`) :**
   - Move Rule 0 (Emergency comfort deficit bypass), Rule C / Hard Ambient Overshoot Ceiling cutoff, Stale Sensor Watchdog cutoff, and Rule E (Open window cutoff) outside the `if self._cur_temp is not None and self._outdoor_temp is not None:` block so they remain active even when `outdoor_sensor` is temporarily `unavailable`.
-- [ ] **[MAJOR - F-05] Harden Stale Sensor Watchdog Across Restarts & Cover Outdoor Sensor (`climate.py:491`, `climate.py:1426-1441`, `climate.py:1489-1503`) :**
+- [x] **[MAJOR - F-05] Harden Stale Sensor Watchdog Across Restarts & Cover Outdoor Sensor (`climate.py:491`, `climate.py:1426-1441`, `climate.py:1489-1503`) :**
   - Persist `_cur_temp_ts` and `_outdoor_temp_ts` in the `Store` (updating timestamps on genuine sensor updates rather than trusting HA boot-time `last_updated` resets).
   - Evaluate `_outdoor_temp_ts` in the watchdog or fall back cleanly when the outdoor sensor is stale.
-- [ ] **[MAJOR - F-09] Expose Smoothed Derivative `_derivative_smooth` in Companion Sensor & Diagnostics (`sensor.py:70`, `diagnostics.py:58`) :**
+- [x] **[MAJOR - F-09] Expose Smoothed Derivative `_derivative_smooth` in Companion Sensor & Diagnostics (`sensor.py:70`, `diagnostics.py:58`) :**
   - Replace `t._temp_derivative` (raw unsmoothed Kalata velocity) with `t._derivative_smooth` (`tau_v = 1.0 h` low-pass filtered derivative) in `sensor.py` and `diagnostics.py` to match `climate.py:956`.
-- [ ] **[MAJOR - F-10] Fix Execution Order and Derivative Source in `_check_window_open_state` (`climate.py:1048-1049`, `climate.py:1268`, `climate.py:1281`, `climate.py:1505-1521`) :**
+- [x] **[MAJOR - F-10] Fix Execution Order and Derivative Source in `_check_window_open_state` (`climate.py:1048-1049`, `climate.py:1268`, `climate.py:1281`, `climate.py:1505-1521`) :**
   - Update `_temp_history` and the Kalata observer **before** calling `_check_window_open_state`, and use `_derivative_smooth` (or properly updated state) Consistently.
-- [ ] **[MAJOR - F-11] Expose Missing Configuration Keys in UI ConfigFlow & OptionsFlow (`config_flow.py:118-258`, `config_flow.py:299-664`) :**
+- [x] **[MAJOR - F-11] Expose Missing Configuration Keys in UI ConfigFlow & OptionsFlow (`config_flow.py:118-258`, `config_flow.py:299-664`) :**
   - Add `CONF_ENFORCE_DAILY_QUOTA_SENSOR`, `CONF_WINDOW_DETECTION_SENSOR`, `CONF_COMFORT_TEMP`, `CONF_MIN_CYCLE_DURATION`, `CONF_MIN_OFF_CYCLE_DURATION`, and `CONF_MAX_CYCLES_PER_DAY` to the UI flows so UI-configured entries have full feature parity with YAML.
-- [ ] **[MAJOR - F-13] Remove Blocking Synchronous `open()` Call at Module Import Time (`const.py:8-18`) :**
+- [x] **[MAJOR - F-13] Remove Blocking Synchronous `open()` Call at Module Import Time (`const.py:8-18`) :**
   - Replace the import-time `open("manifest.json")` call in `const.py` with a static `INTEGRATION_VERSION = "0.3.2"` constant verified against `manifest.json` via a unit test, eliminating Home Assistant 2024.6+ event-loop blocking I/O warnings.
-- [ ] **[MAJOR - F-14] Strengthen Unit Test Suite Against Mocking Blind Spots (`tests/test_fsm.py`, `tests/conftest.py`, `tests/test_config_flow.py`) :**
+- [x] **[MAJOR - F-14] Strengthen Unit Test Suite Against Mocking Blind Spots (`tests/test_fsm.py`, `tests/conftest.py`, `tests/test_config_flow.py`) :**
   - Replace the standalone `MockDanfossFSM` in `tests/test_fsm.py` with tests against `PwmFloorHeatingThermostat`.
   - Add an end-to-end `OptionsFlow` $\rightarrow$ `async_setup_entry` unit test verifying parameter units (`peak_max_run_duration`, `stagger_delay`), restart during `FSM_RUNNING_MIN_LOCK` with active reconciliation, and safety evaluation when `outdoor_sensor` is `None`.
 

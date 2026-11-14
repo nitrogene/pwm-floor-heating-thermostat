@@ -1,21 +1,13 @@
 """Constants for the PWM Floor Heating Thermostat integration."""
 
-import json
 from datetime import timedelta
-from pathlib import Path
+
+INTEGRATION_VERSION = "0.3.4"
 
 
 def get_integration_version() -> str:
-    """Read version dynamically from manifest.json."""
-    try:
-        manifest_path = Path(__file__).parent / "manifest.json"
-        with open(manifest_path, encoding="utf-8") as f:
-            return str(json.load(f).get("version", "0.3.0"))
-    except Exception:
-        return "0.3.0"
-
-
-INTEGRATION_VERSION = get_integration_version()
+    """Return the static integration version without blocking file I/O at import time."""
+    return INTEGRATION_VERSION
 
 DOMAIN = "pwm_floor_heating_thermostat"
 
@@ -46,16 +38,18 @@ DEFAULT_AUTO_CALIBRATE_HEAT_LOSS = False
 CONF_HEAT_LOSS_CONFIDENCE_SAMPLES = "heat_loss_confidence_samples"  # Min samples count for unconstrained direct application
 DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES = 10  # Samples count above which measured heat loss is applied unconstrained
 MIN_HEAT_LOSS_WK = 0.5  # Physical lower bound for heat loss coefficient (W/K)
+MIN_HEAT_LOSS_RATIO = 0.50  # Minimum ratio (50% of configured baseline H) allowed for auto-calibration
 CONF_AUTO_CALIBRATE_DEAD_TIME = "auto_calibrate_dead_time"  # Soft self-adaptation of dead time theta
 DEFAULT_AUTO_CALIBRATE_DEAD_TIME = False
 CONF_KALATA_PROCESS_NOISE = "kalata_process_noise"  # Continuous Kalata process acceleration noise (q_proc)
-DEFAULT_KALATA_PROCESS_NOISE = 0.005  # Default 0.005 (°C/h)²/h for high-inertia underfloor slabs
+DEFAULT_KALATA_PROCESS_NOISE = 0.001  # Default 0.001 (°C/h)²/h for high-inertia underfloor slabs
 CONF_OUTDOOR_PRECHARGE_MAX_TEMP = "outdoor_precharge_max_temp"  # Max outdoor temp for off-peak precharge
 DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP = 12.0  # °C
 CONF_COMFORT_SAFETY_DEFICIT = "comfort_safety_deficit"  # Room deficit overriding peak-hour quota
 DEFAULT_COMFORT_SAFETY_DEFICIT = 0.8  # °C
 CONF_RULE_B_MIN_THRESHOLD = "rule_b_min_threshold"  # Minimum threshold for Rule B anticipated drop trigger
 DEFAULT_RULE_B_MIN_THRESHOLD = 0.25  # °C
+MAX_RULE_B_THRESHOLD = 0.60  # Maximum ceiling (°C) for Rule B anticipation threshold
 
 # Environmental sensors (solar irradiance & wind convective loss)
 CONF_SOLAR_SENSOR = "solar_sensor"
