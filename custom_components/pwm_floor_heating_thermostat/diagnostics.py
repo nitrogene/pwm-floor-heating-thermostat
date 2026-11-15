@@ -13,7 +13,7 @@ except ImportError:
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, MULTI_ZONE_STARTUP_COOLDOWN_SECONDS
 from .coordinator import PwmThermostatCoordinator
 
 TO_REDACT: list[str] = []
@@ -39,8 +39,7 @@ async def async_get_config_entry_diagnostics(
     if thermostat:
         hours_needed = getattr(thermostat, "_hours_needed_24h", 0.0)
         hours_done = getattr(thermostat, "_hours_run_today", 0.0)
-        stagger = getattr(thermostat, "_stagger_delay", None)
-        stagger_sec = int(stagger.total_seconds()) if stagger else 0
+        stagger_sec = MULTI_ZONE_STARTUP_COOLDOWN_SECONDS
         peak_dur = getattr(thermostat, "_peak_max_run_duration", None)
         peak_dur_min = int(peak_dur.total_seconds() // 60) if peak_dur else None
 

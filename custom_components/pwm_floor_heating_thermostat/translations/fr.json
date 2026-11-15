@@ -70,7 +70,6 @@
           "floor_temp_sensor": "Sonde de boucle d'eau / dalle",
           "max_floor_temp": "Plafond max température dalle (°C)",
           "min_floor_temp": "Seuil hors-gel dalle (°C)",
-          "stagger_delay": "Délai de déphasage anti-pic de démarrage (secondes)",
           "solar_sensor": "Capteur de rayonnement solaire / luminosité",
           "wind_sensor": "Capteur de vitesse du vent / anémomètre",
           "auto_calibrate_heat_loss": "Auto-adaptation douce du coefficient H (Mode B)",

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.7] - 2026-11-15
+
+### Changed
+- **Dynamic Multi-Zone Inter-Compressor Anti-Inrush Cooldown**:
+  - Replaced the static per-zone `stagger_delay` configuration with a shared 5-minute (`300s`) inter-compressor startup cooldown stored in `hass.data[DOMAIN]`.
+  - Solo zone startups now engage with `0s` delay, while any other zone attempting to start within 5 minutes of another compressor's startup is deferred with `Staggered startup delay (Xs remaining, anti inrush peak protection)` and updated `next_transition_time`.
+  - Removed `stagger_delay` from `OptionsFlow` UI and translations while preserving backward compatibility for existing config entries.
+
+---
+
 ## [0.3.6] - 2026-11-15
 
 ### Fixed

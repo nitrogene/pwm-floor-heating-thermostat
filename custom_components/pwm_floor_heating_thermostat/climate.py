@@ -174,6 +174,7 @@ from .const import (
     MAX_UNSERVED_QUOTA_CARRYOVER_HOURS,
     MIN_HEAT_LOSS_RATIO,
     MIN_HEAT_LOSS_WK,
+    MULTI_ZONE_STARTUP_COOLDOWN_SECONDS,
     POST_AIRING_MAX_DERIVATIVE,
     POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
@@ -472,10 +473,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._away_temp = float(config.get(CONF_AWAY_TEMP, DEFAULT_AWAY_TEMP))
         self._comfort_temp = float(config.get(CONF_COMFORT_TEMP, DEFAULT_TARGET_TEMP))
         self._preset_mode: str = PRESET_COMFORT
-
-        # Multi-Zone coordination & inrush staggering
-        self._stagger_delay = _parse_timedelta(config.get(CONF_STAGGER_DELAY), DEFAULT_STAGGER_DELAY)
-        self._demand_start_time: datetime | None = None
 
         # Live state
         self._cur_temp: float | None = None
@@ -1090,7 +1087,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "comfort_temp": self._comfort_temp,
             "eco_temp": self._eco_temp,
             "away_temp": self._away_temp,
-            "stagger_delay_sec": int(self._stagger_delay.total_seconds()),
+            "stagger_delay_sec": MULTI_ZONE_STARTUP_COOLDOWN_SECONDS,
             "peak_max_run_duration_min": int(self._peak_max_run_duration.total_seconds() // 60),
             "compressor_cycles_today": self._cycles_today,
             "max_cycles_budget": self._max_cycles,
@@ -1967,20 +1964,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             should_heat = False
             self._decision_reason = "Open window / ventilation detected. Heating suspended."
 
-        # Rule F: Multi-Zone startup staggering
-        stagger_remaining_sec = 0
-        if should_heat and self._fsm_state == FSM_IDLE and self._stagger_delay.total_seconds() > 0:
-            if self._demand_start_time is None:
-                self._demand_start_time = now_utc
-            demand_elapsed = (now_utc - self._demand_start_time).total_seconds()
-            if demand_elapsed < self._stagger_delay.total_seconds():
-                stagger_remaining_sec = int(self._stagger_delay.total_seconds() - demand_elapsed)
+        # Rule F: Multi-Zone inter-compressor anti-inrush startup cooldown (shared via hass.data[DOMAIN])
+        if should_heat and self._fsm_state == FSM_IDLE:
+            stagger_remaining_sec = self._get_inter_zone_cooldown_remaining(now_utc)
+            if stagger_remaining_sec > 0:
                 should_heat = False
                 self._decision_reason = (
                     f"Staggered startup delay ({stagger_remaining_sec}s remaining, anti inrush peak protection)"
                 )
-        elif not should_heat:
-            self._demand_start_time = None
 
         # Rule G: Peak-hour top-up run duration cap (Adaptive PWM period modulation)
         # In peak hours, avoid deep continuous gavage at expensive grid tariffs. Once top-up reaches
@@ -2233,6 +2224,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         t_min = now
         if self._fsm_state == FSM_WAITING_MIN_OFF and self._last_state_change:
             t_min = self._last_state_change + self._min_off_duration
+        elif self._fsm_state == FSM_IDLE:
+            cooldown_rem = self._get_inter_zone_cooldown_remaining(now)
+            if cooldown_rem > 0:
+                t_min = now + timedelta(seconds=cooldown_rem)
         self._earliest_transition_time = t_min
 
         # Inhibit prediction if sensors are stale or window open
@@ -2249,7 +2244,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         t_off_peak: datetime | None = None
         off_peak_start_time = self._find_scheduled_off_peak_start(now)
         if off_peak_start_time is not None:
-            t_off_peak = off_peak_start_time + self._stagger_delay
+            t_off_peak = off_peak_start_time
 
         # Evaluate cooling trajectory in Peak hours (Rule B anticipated drop)
         t_drop: datetime | None = None
@@ -2267,12 +2262,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 drop_hours = delta_drop / abs(v)
                 t_drop = now + timedelta(hours=drop_hours)
 
-        stagger_m = int(self._stagger_delay.total_seconds() // 60)
-        stagger_suffix = f" (+{stagger_m}m stagger)" if stagger_m > 0 else ""
-
         if t_off_peak is not None and (t_drop is None or t_off_peak <= t_drop):
             self._next_transition_time = max(t_min, t_off_peak)
-            self._next_transition_reason = f"Off-peak precharge scheduled{stagger_suffix}"
+            self._next_transition_reason = "Off-peak precharge scheduled"
         elif t_drop is not None:
             self._next_transition_time = max(t_min, t_drop)
             self._next_transition_reason = (
@@ -2280,10 +2272,35 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             )
         elif t_off_peak is not None:
             self._next_transition_time = max(t_min, t_off_peak)
-            self._next_transition_reason = f"Off-peak precharge scheduled{stagger_suffix}"
+            self._next_transition_reason = "Off-peak precharge scheduled"
         else:
             self._next_transition_time = None
             self._next_transition_reason = "Idle (stable trajectory, no heating demand predicted)"
+
+    def _get_shared_startup_state(self) -> dict[str, Any] | None:
+        """Return shared multi-zone startup lock state stored in hass.data[DOMAIN]."""
+        if self.hass is None or not isinstance(getattr(self.hass, "data", None), dict):
+            return None
+        domain_data = self.hass.data.setdefault(DOMAIN, {})
+        if not isinstance(domain_data, dict):
+            return None
+        state = domain_data.setdefault("_multi_zone_startup", {})
+        return state if isinstance(state, dict) else None
+
+    def _get_inter_zone_cooldown_remaining(self, now: datetime) -> int:
+        """Return remaining seconds of the 5-minute inter-compressor anti-inrush cooldown."""
+        shared = self._get_shared_startup_state()
+        if shared is None:
+            return 0
+        last_start_ts = shared.get("last_start_ts")
+        last_start_zone = shared.get("last_start_zone")
+        my_zone = self._unique_id or self._name
+        if not isinstance(last_start_ts, datetime) or last_start_zone == my_zone:
+            return 0
+        since_last = (now - last_start_ts).total_seconds()
+        if 0 <= since_last < MULTI_ZONE_STARTUP_COOLDOWN_SECONDS:
+            return int(MULTI_ZONE_STARTUP_COOLDOWN_SECONDS - since_last)
+        return 0
 
     async def _async_start_heating_safe(self) -> None:
         """Start compressor if minimum off-cycle safety conditions are satisfied."""
@@ -2344,9 +2361,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._last_state_change = now
         self._cycle_start_time = now
         self._heating_start_derivative = self._derivative_smooth
-        self._demand_start_time = None
         self._hvac_action = HVACAction.HEATING
         self._cycles_today += 1
+        shared = self._get_shared_startup_state()
+        if shared is not None:
+            shared["last_start_ts"] = now
+            shared["last_start_zone"] = self._unique_id or self._name
         self._schedule_state_save()
 
     async def _async_stop_heating_safe(self) -> None:

@@ -51,7 +51,6 @@ from .const import (
     CONF_SENSOR_STALE_TIMEOUT_MINUTES,
     CONF_SLAB_TIME_CONSTANT,
     CONF_SOLAR_SENSOR,
-    CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
     CONF_THERMAL_RUNAWAY_DERIVATIVE,
     CONF_USE_WEATHER_FORECAST_AVERAGE,
@@ -525,22 +524,6 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         max=20.0,
                         step=0.5,
                         unit_of_measurement="°C",
-                        mode=selector.NumberSelectorMode.BOX,
-                    )
-                ),
-                vol.Optional(
-                    CONF_STAGGER_DELAY,
-                    default=int(
-                        curr.get(CONF_STAGGER_DELAY, 0)
-                        if isinstance(curr.get(CONF_STAGGER_DELAY), (int, float))
-                        else 0
-                    ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0,
-                        max=1800,
-                        step=30,
-                        unit_of_measurement="s",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),

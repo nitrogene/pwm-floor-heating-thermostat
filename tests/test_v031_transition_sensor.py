@@ -24,7 +24,6 @@ from custom_components.pwm_floor_heating_thermostat.const import (
     CONF_PEAK_MAX_RUN_DURATION,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
-    CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
@@ -146,12 +145,11 @@ def test_next_transition_when_idle_waiting_min_off(base_config):
 
 
 def test_next_transition_scheduled_off_peak_with_stagger(base_config):
-    """Verify turn_on estimation schedules off-peak precharge with zone stagger delay."""
+    """Verify turn_on estimation schedules off-peak precharge cleanly at scheduled start."""
     async def _test():
         hass = MagicMock()
         t0 = datetime(2026, 11, 13, 20, 0, 0, tzinfo=UTC)
 
-        base_config[CONF_STAGGER_DELAY] = 300  # 5 min stagger
         base_config["off_peak_start_entity"] = "input_datetime.off_peak_start"
         thermostat = PwmFloorHeatingThermostat(hass, base_config)
         thermostat._hvac_mode = HVACMode.HEAT
@@ -174,11 +172,10 @@ def test_next_transition_scheduled_off_peak_with_stagger(base_config):
 
         assert thermostat._next_transition_type == "turn_on"
         assert thermostat._next_transition_time is not None
-        # Must land on local 22:06 + 5 min stagger = 22:11
         local_target = thermostat._next_transition_time.astimezone()
         assert local_target.hour == 22
-        assert local_target.minute == 11
-        assert "Off-peak precharge scheduled (+5m stagger)" in thermostat._next_transition_reason
+        assert local_target.minute == 6
+        assert "Off-peak precharge scheduled" in thermostat._next_transition_reason
 
     asyncio.run(_test())
 

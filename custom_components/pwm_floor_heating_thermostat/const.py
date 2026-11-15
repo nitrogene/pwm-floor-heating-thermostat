@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-INTEGRATION_VERSION = "0.3.6"
+INTEGRATION_VERSION = "0.3.7"
 
 
 def get_integration_version() -> str:
@@ -90,7 +90,8 @@ DEFAULT_ECO_TEMP = 17.0
 DEFAULT_AWAY_TEMP = 15.0
 
 # Multi-Zone coordination & inrush staggering
-CONF_STAGGER_DELAY = "stagger_delay"
+MULTI_ZONE_STARTUP_COOLDOWN_SECONDS = 300  # 5 min global inter-compressor startup cooldown
+CONF_STAGGER_DELAY = "stagger_delay"  # Deprecated: kept for config backward compatibility
 DEFAULT_STAGGER_DELAY = timedelta(seconds=0)
 
 # Default values

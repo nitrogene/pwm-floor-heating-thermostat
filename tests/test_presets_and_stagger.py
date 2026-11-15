@@ -157,3 +157,81 @@ def test_stagger_delay_delays_startup():
     )
     assert should_heat_t2
     assert "Heating needed" in reason_t2
+
+
+def test_shared_inter_zone_cooldown_in_hass_data():
+    """Verify 5-min inter-compressor cooldown via hass.data[DOMAIN] without delaying solo startups."""
+    import asyncio
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from homeassistant.components.climate import HVACMode
+
+    from custom_components.pwm_floor_heating_thermostat.climate import PwmFloorHeatingThermostat
+    from custom_components.pwm_floor_heating_thermostat.const import (
+        CONF_DEAD_TIME,
+        CONF_DRY_RUN,
+        CONF_HEAT_LOSS,
+        CONF_HEATER,
+        CONF_OUTDOOR_SENSOR,
+        CONF_POWER_WATTS,
+        CONF_SLAB_TIME_CONSTANT,
+        CONF_TARGET_SENSOR,
+        FSM_IDLE,
+        FSM_RUNNING_MIN_LOCK,
+    )
+
+    async def _test():
+        hass = MagicMock()
+        hass.data = {}
+        hass.services.async_call = AsyncMock()
+
+        def make_zone(name: str, uid: str) -> PwmFloorHeatingThermostat:
+            cfg = {
+                "name": name,
+                "unique_id": uid,
+                CONF_HEATER: f"switch.{uid}",
+                CONF_TARGET_SENSOR: f"sensor.temp_{uid}",
+                CONF_OUTDOOR_SENSOR: "sensor.temp_out",
+                CONF_POWER_WATTS: 1500,
+                CONF_HEAT_LOSS: 100.0,
+                CONF_SLAB_TIME_CONSTANT: 4.0,
+                CONF_DEAD_TIME: 1.0,
+                CONF_DRY_RUN: True,
+            }
+            z = PwmFloorHeatingThermostat(hass, cfg)
+            z._cur_temp = 17.0
+            z._target_temp = 19.0
+            z._outdoor_temp = 2.0
+            z._temp_projected = 16.8
+            z._hvac_mode = HVACMode.HEAT
+            return z
+
+        zone_a = make_zone("Living Room", "zone_a")
+        zone_b = make_zone("Bedroom", "zone_b")
+
+        t0 = datetime(2026, 11, 15, 5, 0, 0, tzinfo=UTC)
+        zone_a._cur_temp_ts = t0
+        zone_b._cur_temp_ts = t0
+
+        # 1. Zone A starts alone -> 0s delay, immediate start
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await zone_a._async_control_heating(now=t0)
+            assert zone_a._fsm_state == FSM_RUNNING_MIN_LOCK
+
+        # 2. Zone B wants to start 60s later -> blocked for remaining 240s
+        t1 = t0 + timedelta(seconds=60)
+        zone_b._cur_temp_ts = t1
+        with patch("homeassistant.util.dt.utcnow", return_value=t1):
+            await zone_b._async_control_heating(now=t1)
+            assert zone_b._fsm_state == FSM_IDLE
+            assert "Staggered startup delay (240s remaining, anti inrush peak protection)" in zone_b._decision_reason
+
+        # 3. At t0 + 300s (5 min elapsed) -> Zone B starts immediately
+        t2 = t0 + timedelta(seconds=300)
+        zone_b._cur_temp_ts = t2
+        with patch("homeassistant.util.dt.utcnow", return_value=t2):
+            await zone_b._async_control_heating(now=t2)
+            assert zone_b._fsm_state == FSM_RUNNING_MIN_LOCK
+
+    asyncio.run(_test())

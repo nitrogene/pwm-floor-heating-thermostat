@@ -57,7 +57,6 @@
           "floor_temp_sensor": "Floor / Water Loop Temperature Sensor",
           "max_floor_temp": "Max Floor Temperature Limit (°C)",
           "min_floor_temp": "Floor Freeze Protection Limit (°C)",
-          "stagger_delay": "Multi-Zone Startup Stagger Delay (seconds)",
           "solar_sensor": "Solar Irradiance / Illuminance Sensor",
           "wind_sensor": "Wind Speed Sensor",
           "auto_calibrate_heat_loss": "Mode B Auto-Adaptation of Heat Loss H",
