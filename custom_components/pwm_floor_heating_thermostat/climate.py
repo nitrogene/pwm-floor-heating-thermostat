@@ -1141,6 +1141,31 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             await self._async_control_heating()
         self.async_write_ha_state()
 
+    @staticmethod
+    def _extract_state_timestamp(state: Any) -> datetime | None:
+        """Return the freshest valid timestamp (last_reported, fallback last_updated) from a HA state."""
+        if state is None or getattr(state, "state", None) in ["unknown", "unavailable"]:
+            return None
+        lr = getattr(state, "last_reported", None)
+        if isinstance(lr, datetime):
+            return lr
+        lu = getattr(state, "last_updated", None)
+        if isinstance(lu, datetime):
+            return lu
+        return None
+
+    def _refresh_sensor_timestamp(
+        self, entity_id: str | None, current_ts: datetime | None
+    ) -> datetime | None:
+        """Refresh cached sensor timestamp when HA reports a newer state_reported or state_changed time."""
+        if not entity_id or self.hass is None:
+            return current_ts
+        st = self.hass.states.get(entity_id)
+        ts = self._extract_state_timestamp(st)
+        if ts is not None and (current_ts is None or ts > current_ts):
+            return ts
+        return current_ts
+
     @callback
     def _async_target_sensor_changed(self, event) -> None:
         """Handle ambient temperature sensor state change."""
@@ -1150,8 +1175,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         try:
             self._cur_temp = float(new_state.state)
             now_utc = dt_util.utcnow()
-            lu = getattr(new_state, "last_updated", None)
-            self._cur_temp_ts = lu if isinstance(lu, datetime) else now_utc
+            self._cur_temp_ts = self._extract_state_timestamp(new_state) or now_utc
             self._update_trajectory_projection(now_utc)
             self._check_window_open_state(now_utc)
             self._schedule_state_save()
@@ -1167,8 +1191,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             return
         try:
             self._outdoor_temp = float(new_state.state)
-            lu = getattr(new_state, "last_updated", None)
-            self._outdoor_temp_ts = lu if isinstance(lu, datetime) else dt_util.utcnow()
+            self._outdoor_temp_ts = self._extract_state_timestamp(new_state) or dt_util.utcnow()
             self._schedule_state_save()
             self.async_write_ha_state()
         except (ValueError, TypeError):
@@ -1605,8 +1628,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._cur_temp = float(st_in.state)
                 now_utc = dt_util.utcnow()
                 if self._cur_temp_ts is None:
-                    lu = getattr(st_in, "last_updated", None)
-                    self._cur_temp_ts = lu if isinstance(lu, datetime) else now_utc
+                    self._cur_temp_ts = self._extract_state_timestamp(st_in) or now_utc
                 self._update_trajectory_projection(now_utc)
                 self._check_window_open_state(now_utc)
             except (ValueError, TypeError):
@@ -1617,8 +1639,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             try:
                 self._outdoor_temp = float(st_out.state)
                 if self._outdoor_temp_ts is None:
-                    lu = getattr(st_out, "last_updated", None)
-                    self._outdoor_temp_ts = lu if isinstance(lu, datetime) else dt_util.utcnow()
+                    self._outdoor_temp_ts = self._extract_state_timestamp(st_out) or dt_util.utcnow()
             except (ValueError, TypeError):
                 pass
 
@@ -1671,12 +1692,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._sensor_stale = False
         self._outdoor_sensor_stale = False
         if self._sensor_stale_timeout_minutes > 0:
-            if self._cur_temp_ts is None and self._target_sensor:
-                st_target = self.hass.states.get(self._target_sensor)
-                if st_target:
-                    lu = getattr(st_target, "last_updated", None)
-                    if isinstance(lu, datetime):
-                        self._cur_temp_ts = lu
+            self._cur_temp_ts = self._refresh_sensor_timestamp(
+                self._target_sensor, self._cur_temp_ts
+            )
             if self._cur_temp_ts is not None and isinstance(self._cur_temp_ts, datetime):
                 elapsed_stale_sec = (now_utc - self._cur_temp_ts).total_seconds()
                 if isinstance(elapsed_stale_sec, (int, float)) and elapsed_stale_sec >= (
@@ -1684,12 +1702,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 ):
                     self._sensor_stale = True
 
-            if self._outdoor_temp_ts is None and self._outdoor_sensor:
-                st_out = self.hass.states.get(self._outdoor_sensor)
-                if st_out:
-                    lu_out = getattr(st_out, "last_updated", None)
-                    if isinstance(lu_out, datetime):
-                        self._outdoor_temp_ts = lu_out
+            self._outdoor_temp_ts = self._refresh_sensor_timestamp(
+                self._outdoor_sensor, self._outdoor_temp_ts
+            )
             if self._outdoor_temp_ts is not None and isinstance(self._outdoor_temp_ts, datetime):
                 elapsed_out_sec = (now_utc - self._outdoor_temp_ts).total_seconds()
                 if isinstance(elapsed_out_sec, (int, float)) and elapsed_out_sec >= (

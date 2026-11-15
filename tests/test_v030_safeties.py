@@ -258,3 +258,44 @@ def test_v030_config_flow_and_options_flow():
         assert options_save["data"][CONF_HARD_OVERSHOOT_MARGIN] == 0.8
 
     asyncio.run(_test())
+
+
+def test_stale_sensor_watchdog_uses_last_reported_heartbeat(base_config):
+    """Verify last_reported heartbeat refreshes watchdog even when value/last_updated is unchanged."""
+    async def _test():
+        hass = MagicMock()
+        t0 = datetime(2026, 11, 15, 5, 0, 0, tzinfo=UTC)
+
+        # Ambient state value unchanged for 105 min (last_updated old), but reported 10 min ago
+        ambient_state = MagicMock()
+        ambient_state.state = "19.4"
+        ambient_state.last_updated = t0 - timedelta(minutes=105)
+        ambient_state.last_reported = t0 - timedelta(minutes=10)
+        hass.states.get.side_effect = lambda eid: (
+            ambient_state if eid == base_config["target_sensor"] else None
+        )
+
+        thermostat = PwmFloorHeatingThermostat(hass, base_config)
+        thermostat._cur_temp = 19.4
+        thermostat._target_temp = 19.0
+        thermostat._outdoor_temp = 5.0
+        thermostat._temp_projected = 19.2
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._cur_temp_ts = t0 - timedelta(minutes=105)
+
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+            assert thermostat._sensor_stale is False
+            assert thermostat._cur_temp_ts == ambient_state.last_reported
+            assert "Fail-safe shutdown" not in thermostat._decision_reason
+
+        # If sensor becomes unavailable, last_reported must be ignored and stale triggers
+        ambient_state.state = "unavailable"
+        ambient_state.last_reported = t0
+        thermostat._cur_temp_ts = t0 - timedelta(minutes=95)
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+            assert thermostat._sensor_stale is True
+            assert "Fail-safe shutdown: ambient sensor stale for 95 min" in thermostat._decision_reason
+
+    asyncio.run(_test())

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.6] - 2026-11-15
+
+### Fixed
+- **Stale Sensor Watchdog (`last_reported` Heartbeat Support)**:
+  - Updated sensor timestamp tracking (`_extract_state_timestamp` / `_refresh_sensor_timestamp`) to prioritize Home Assistant's `last_reported` timestamp (with fallback to `last_updated`), preventing false fail-safe shutdowns when a room temperature stays perfectly steady and sensors only emit identical readings.
+  - Ignores `unknown` and `unavailable` states so genuine sensor outages still trigger the stale watchdog as expected.
+
+---
+
 ## [0.3.5] - 2026-11-14
 
 ### Added
