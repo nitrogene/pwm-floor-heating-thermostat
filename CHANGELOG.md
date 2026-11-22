@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.8] - 2026-11-22
+
+### Added
+- **Translated `decision` Diagnostic Sensor (`ENUM`)**:
+  - Added a dedicated `sensor.<zone>_decision` diagnostic entity (`SensorDeviceClass.ENUM`) exposing short machine keys (`off`, `idle`, `off_peak_precharge`, `anticipated_drop`, `sensor_stale`, etc.) with native English and French translations (`strings.json`, `translations/en.json`, `translations/fr.json`) and full history/logbook tracking.
+  - Exposed the detailed explanation string with live values in the `detail` attribute of the `decision` sensor while preserving `decision_reason` on the `climate` entity for backward compatibility.
+
+### Changed
+- **Optional Stale Sensor Watchdog (`0` min)**:
+  - Lowered the minimum value of `sensor_stale_timeout_minutes` in `ConfigFlow` and `OptionsFlow` from `30` to `0`, allowing users to disable the stale sensor fail-safe shutdown directly from the UI when using battery-powered sensors with long reporting intervals.
+
+---
+
 ## [0.3.7] - 2026-11-15
 
 ### Changed

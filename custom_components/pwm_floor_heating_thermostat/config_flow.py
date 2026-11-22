@@ -222,7 +222,7 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=30,
+                        min=0,
                         max=360,
                         step=15,
                         unit_of_measurement="min",
@@ -683,7 +683,7 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=30,
+                        min=0,
                         max=360,
                         step=15,
                         unit_of_measurement="min",

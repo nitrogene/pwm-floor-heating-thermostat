@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from homeassistant.const import EntityCategory
 
-from custom_components.pwm_floor_heating_thermostat.const import DOMAIN, FSM_IDLE
+from custom_components.pwm_floor_heating_thermostat.const import DECISION_IDLE, DOMAIN, FSM_IDLE
 from custom_components.pwm_floor_heating_thermostat.sensor import (
     SENSOR_TYPES,
     PwmDiagnosticSensor,
@@ -27,6 +27,8 @@ def mock_thermostat():
     t._total_heating_hours_today = 0.50
     t._heat_loss_measured_wk = 13.8
     t._fsm_state = FSM_IDLE
+    t._decision_key = DECISION_IDLE
+    t._decision_reason = "Idle (stable trajectory)"
     return t
 
 
@@ -52,9 +54,9 @@ def test_sensor_setup_entry(mock_thermostat, mock_entry):
 
         await async_setup_entry(hass, mock_entry, mock_add_entities)
 
-        # 9 diagnostic sensors expected
+        # 10 diagnostic sensors expected
         assert len(added_entities) == len(SENSOR_TYPES)
-        assert len(added_entities) == 9
+        assert len(added_entities) == 10
 
         # Validate instantiated sensor properties
         sensor_map = {s.entity_description.key: s for s in added_entities}
@@ -92,6 +94,11 @@ def test_sensor_setup_entry(mock_thermostat, mock_entry):
         # 7. FSM state
         s_fsm = sensor_map["fsm_state"]
         assert s_fsm.native_value == FSM_IDLE
+
+        # 8. Decision enum & detail attribute
+        s_dec = sensor_map["decision"]
+        assert s_dec.native_value == DECISION_IDLE
+        assert s_dec.extra_state_attributes == {"detail": "Idle (stable trajectory)"}
 
     asyncio.run(_test())
 

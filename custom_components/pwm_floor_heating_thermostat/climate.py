@@ -129,6 +129,23 @@ from .const import (
     CONF_WINDOW_TIMEOUT,
     DEAD_TIME_MAX_DEVIATION,
     DEAD_TIME_MIN_SAMPLES,
+    DECISION_ANTICIPATED_DROP,
+    DECISION_CYCLE_BUDGET_EXHAUSTED,
+    DECISION_EMERGENCY_DEFICIT,
+    DECISION_FLOOR_FREEZE_GUARD,
+    DECISION_FLOOR_MAX_CUTOFF,
+    DECISION_HARD_OVERSHOOT_CUTOFF,
+    DECISION_IDLE,
+    DECISION_MAX_RUN_CAP,
+    DECISION_OFF,
+    DECISION_OFF_PEAK_PRECHARGE,
+    DECISION_OVERSHOOT_CUTOFF,
+    DECISION_PEAK_CYCLE_CAP,
+    DECISION_QUOTA_REACHED,
+    DECISION_SENSOR_STALE,
+    DECISION_STAGGERED_STARTUP,
+    DECISION_THERMAL_RUNAWAY,
+    DECISION_WINDOW_OPEN,
     DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
     DEFAULT_AUTO_CALIBRATE_HEAT_LOSS,
     DEFAULT_AWAY_TEMP,
@@ -519,6 +536,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Telemetry & simulation
         self._simulated_heater_state = False
         self._decision_reason = "Model initializing"
+        self._decision_key = DECISION_OFF if self._hvac_mode == HVACMode.OFF else DECISION_IDLE
         self._energy_needed_kwh = 0.0
         self._hours_needed_24h = 0.0
 
@@ -1133,6 +1151,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         """Change HVAC mode (Heat / Off)."""
         self._hvac_mode = hvac_mode
         if hvac_mode == HVACMode.OFF:
+            self._decision_key = DECISION_OFF
+            self._decision_reason = "Thermostat is turned off (HVACMode.OFF)"
             await self._async_stop_heating_safe()
         else:
             await self._async_control_heating()
@@ -1671,6 +1691,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             )
 
         if self._hvac_mode == HVACMode.OFF:
+            self._decision_key = DECISION_OFF
+            self._decision_reason = "Thermostat is turned off (HVACMode.OFF)"
             # If compressor is in running state, ensure safe shutdown once min cycle is fulfilled
             if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
                 await self._async_stop_heating_safe()
@@ -1873,6 +1895,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             # independent of outdoor sensor availability - F-04)
             if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE:
                 should_heat = True
+                self._decision_key = DECISION_EMERGENCY_DEFICIT
                 self._decision_reason = (
                     f"Emergency comfort deficit bypass: curr {self._cur_temp}°C <= target {self._target_temp}°C - "
                     f"{EMERGENCY_COMFORT_DEFICIT_OVERRIDE}°C (quota bypassed)"
@@ -1881,6 +1904,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             elif off_peak_active and outdoor_ref is not None:
                 if error >= -0.5 and outdoor_ref <= self._outdoor_precharge_max_temp:
                     should_heat = True
+                    self._decision_key = DECISION_OFF_PEAK_PRECHARGE
                     self._decision_reason = (
                         f"Off-peak thermal precharge (ext: {outdoor_ref}°C, "
                         f"curr: {self._cur_temp}°C, proj: {round(proj_val, 2)}°C in {self._dead_time}h)"
@@ -1899,6 +1923,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
                 if projected_error > rule_b_threshold or error > self._rule_b_min_threshold:
                     should_heat = True
+                    self._decision_key = DECISION_ANTICIPATED_DROP
                     self._decision_reason = (
                         f"Anticipated thermal drop: projected {round(proj_val, 2)}°C in {self._dead_time}h "
                         f"(slope: {round(self._derivative_smooth, 3)}°C/h, threshold: {rule_b_threshold}°C, "
@@ -1908,11 +1933,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             # Rule C: Surface and ambient overshoot protection (+0.6°C real or projected > target + 0.8°C)
             if error < -0.6 or (projected_error < -0.8 and self._cur_temp >= self._target_temp):
                 should_heat = False
+                self._decision_key = DECISION_OVERSHOOT_CUTOFF
                 self._decision_reason = (
                     f"Overshoot prevention cutoff: curr {self._cur_temp}°C, "
                     f"projected {round(proj_val, 2)}°C (target: {self._target_temp}°C)"
                 )
             elif not should_heat:
+                self._decision_key = DECISION_IDLE
                 self._decision_reason = (
                     f"Idle (stable trajectory: curr {self._cur_temp}°C, "
                     f"projected {round(proj_val, 2)}°C in {self._dead_time}h)"
@@ -1921,6 +1948,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             # Hard Ambient Overshoot Ceiling cutoff: unconditional immediate stop if room exceeds target + margin
             if self._hard_overshoot_margin > 0 and self._cur_temp >= (self._target_temp + self._hard_overshoot_margin):
                 should_heat = False
+                self._decision_key = DECISION_HARD_OVERSHOOT_CUTOFF
                 self._decision_reason = (
                     f"Hard overshoot ceiling cutoff: curr {self._cur_temp}°C >= "
                     f"target {self._target_temp}°C + {self._hard_overshoot_margin}°C"
@@ -1941,6 +1969,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 if error < self._comfort_safety_deficit:
                     should_heat = False
                     self._quota_blocked = True
+                    self._decision_key = DECISION_QUOTA_REACHED
                     self._decision_reason = (
                         f"Daily quota fulfilled ({round(run_hours, 2)}h / {round(self._hours_needed_24h, 2)}h done). "
                         f"Peak-hour cycle inhibited by quota enforcement (switch ON)."
@@ -1949,6 +1978,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Stale Sensor Watchdog Fail-Safe cutoff (unconditional even if outdoor sensor is unavailable - F-04)
         if self._sensor_stale:
             should_heat = False
+            self._decision_key = DECISION_SENSOR_STALE
             stale_min = (
                 int((now_utc - self._cur_temp_ts).total_seconds() // 60)
                 if self._cur_temp_ts
@@ -1962,6 +1992,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         # Rule E: Open window / ventilation detection (unconditional - F-04)
         if self._window_open:
             should_heat = False
+            self._decision_key = DECISION_WINDOW_OPEN
             self._decision_reason = "Open window / ventilation detected. Heating suspended."
 
         # Rule F: Multi-Zone inter-compressor anti-inrush startup cooldown (shared via hass.data[DOMAIN])
@@ -1969,6 +2000,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             stagger_remaining_sec = self._get_inter_zone_cooldown_remaining(now_utc)
             if stagger_remaining_sec > 0:
                 should_heat = False
+                self._decision_key = DECISION_STAGGERED_STARTUP
                 self._decision_reason = (
                     f"Staggered startup delay ({stagger_remaining_sec}s remaining, anti inrush peak protection)"
                 )
@@ -1995,6 +2027,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 and not is_comfort_emergency
             ):
                 should_heat = False
+                self._decision_key = DECISION_PEAK_CYCLE_CAP
                 self._decision_reason = (
                     f"Peak-hour top-up cycle completed ({int(active_run_sec // 60)} min run cap reached, "
                     f"allowing slab thermal diffusion)"
@@ -2011,6 +2044,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             is_freeze_emergency = self._floor_temp is not None and self._floor_temp <= self._min_floor_temp
             if active_run_sec >= (self._max_continuous_run_minutes * 60) and not is_freeze_emergency:
                 should_heat = False
+                self._decision_key = DECISION_MAX_RUN_CAP
                 self._decision_reason = (
                     f"Maximum continuous run duration reached ({int(active_run_sec // 60)} min >= "
                     f"{self._max_continuous_run_minutes} min): enforcing thermal diffusion pause"
@@ -2027,6 +2061,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._thermal_runaway_start_time = now_utc
                 elif (now_utc - self._thermal_runaway_start_time).total_seconds() >= 1800:
                     should_heat = False
+                    self._decision_key = DECISION_THERMAL_RUNAWAY
                     self._decision_reason = (
                         f"Emergency cutoff: thermal runaway detected (dT/dt = "
                         f"{round(self._derivative_smooth, 2)}°C/h > {self._thermal_runaway_derivative}°C/h for >30m)"
@@ -2040,12 +2075,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         if self._floor_temp is not None:
             if self._floor_temp >= self._max_floor_temp:
                 should_heat = False
+                self._decision_key = DECISION_FLOOR_MAX_CUTOFF
                 self._decision_reason = (
                     f"Floor protection cutoff: water temp {self._floor_temp}°C "
                     f"exceeds slab maximum {self._max_floor_temp}°C (DTU 65.14)"
                 )
             elif self._floor_temp <= self._min_floor_temp:
                 should_heat = True
+                self._decision_key = DECISION_FLOOR_FREEZE_GUARD
                 self._decision_reason = (
                     f"Floor freeze protection: water temp {self._floor_temp}°C "
                     f"below floor minimum {self._min_floor_temp}°C"
@@ -2318,6 +2355,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._cycles_today,
                 self._max_cycles,
             )
+            self._decision_key = DECISION_CYCLE_BUDGET_EXHAUSTED
             self._decision_reason = (
                 f"Daily cycle budget exhausted ({self._cycles_today}/{self._max_cycles}). "
                 "Next budget at midnight."

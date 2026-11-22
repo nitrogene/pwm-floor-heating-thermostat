@@ -30,6 +30,7 @@ from .const import (
     ATTR_EARLIEST_TRANSITION_TIME,
     ATTR_NEXT_TRANSITION_REASON,
     ATTR_NEXT_TRANSITION_TYPE,
+    DECISION_OPTIONS,
     DOMAIN,
     FSM_IDLE,
     FSM_RUNNING_MIN_LOCK,
@@ -138,6 +139,14 @@ SENSOR_TYPES: tuple[PwmSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda t: t._next_transition_time if hasattr(t, "_next_transition_time") else None,
     ),
+    PwmSensorEntityDescription(
+        key="decision",
+        translation_key="decision",
+        device_class=SensorDeviceClass.ENUM,
+        options=DECISION_OPTIONS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda t: t._decision_key if hasattr(t, "_decision_key") else None,
+    ),
 )
 
 
@@ -199,6 +208,10 @@ class PwmDiagnosticSensor(CoordinatorEntity[PwmThermostatCoordinator], SensorEnt
         t = self.coordinator.thermostat
         if t is None:
             return {}
+        if self.entity_description.key == "decision":
+            return {
+                "detail": getattr(t, "_decision_reason", None),
+            }
         if self.entity_description.key == "next_transition_time":
             earliest = getattr(t, "_earliest_transition_time", None)
             return {

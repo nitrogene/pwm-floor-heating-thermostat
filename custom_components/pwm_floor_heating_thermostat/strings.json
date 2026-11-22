@@ -104,6 +104,28 @@
           "running_normal": "Running",
           "waiting_min_off": "Pressure equalization"
         }
+      },
+      "decision": {
+        "name": "Decision",
+        "state": {
+          "off": "Off",
+          "idle": "Idle",
+          "emergency_deficit": "Emergency deficit",
+          "off_peak_precharge": "Off-peak precharge",
+          "anticipated_drop": "Anticipated drop",
+          "overshoot_cutoff": "Overshoot cutoff",
+          "hard_overshoot_cutoff": "Hard ceiling",
+          "quota_reached": "Quota reached",
+          "sensor_stale": "Sensor stale",
+          "window_open": "Window open",
+          "staggered_startup": "Staggered start",
+          "peak_cycle_cap": "Peak cycle cap",
+          "max_run_cap": "Max run pause",
+          "thermal_runaway": "Thermal runaway",
+          "floor_max_cutoff": "Floor max cutoff",
+          "floor_freeze_guard": "Floor freeze guard",
+          "cycle_budget_exhausted": "Cycle budget full"
+        }
       }
     },
     "climate": {

@@ -130,6 +130,28 @@
       },
       "next_transition_time": {
         "name": "Prochaine bascule"
+      },
+      "decision": {
+        "name": "Décision",
+        "state": {
+          "off": "Éteint",
+          "idle": "Au repos",
+          "emergency_deficit": "Déficit critique",
+          "off_peak_precharge": "Précharge HC",
+          "anticipated_drop": "Chute anticipée",
+          "overshoot_cutoff": "Coupure overshoot",
+          "hard_overshoot_cutoff": "Plafond absolu",
+          "quota_reached": "Quota atteint",
+          "sensor_stale": "Sonde figée",
+          "window_open": "Fenêtre ouverte",
+          "staggered_startup": "Délai décalé",
+          "peak_cycle_cap": "Fin cycle HP",
+          "max_run_cap": "Pause diffusion",
+          "thermal_runaway": "Emballement",
+          "floor_max_cutoff": "Surchauffe dalle",
+          "floor_freeze_guard": "Hors-gel dalle",
+          "cycle_budget_exhausted": "Budget cycles"
+        }
       }
     },
     "climate": {

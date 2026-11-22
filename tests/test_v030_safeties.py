@@ -296,6 +296,33 @@ def test_stale_sensor_watchdog_uses_last_reported_heartbeat(base_config):
         with patch("homeassistant.util.dt.utcnow", return_value=t0):
             await thermostat._async_control_heating(now=t0)
             assert thermostat._sensor_stale is True
+            assert thermostat._decision_key == "sensor_stale"
             assert "Fail-safe shutdown: ambient sensor stale for 95 min" in thermostat._decision_reason
+
+        # Setting timeout to 0 disables the stale sensor watchdog completely
+        thermostat._sensor_stale_timeout_minutes = 0
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+            assert thermostat._sensor_stale is False
+            assert thermostat._decision_key != "sensor_stale"
+
+    asyncio.run(_test())
+
+
+def test_stale_sensor_timeout_zero_allowed_in_options_flow(base_config):
+    """Verify sensor_stale_timeout_minutes=0 is accepted by options flow schema."""
+    async def _test():
+        entry = MagicMock()
+        entry.entry_id = "test_safety_zero_entry"
+        entry.title = "Safety Thermostat"
+        entry.data = dict(base_config)
+        entry.options = {}
+
+        options_flow = PwmFloorHeatingOptionsFlowHandler(entry)
+        options_save = await options_flow.async_step_init(
+            user_input={CONF_SENSOR_STALE_TIMEOUT_MINUTES: 0}
+        )
+        assert options_save["type"] == "create_entry"
+        assert options_save["data"][CONF_SENSOR_STALE_TIMEOUT_MINUTES] == 0
 
     asyncio.run(_test())
