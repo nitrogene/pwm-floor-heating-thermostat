@@ -120,12 +120,12 @@
         "name": "Déperdition mesurée (Mode A)"
       },
       "fsm_state": {
-        "name": "État FSM Danfoss",
+        "name": "État compresseur",
         "state": {
           "idle": "Au repos",
-          "running_min_lock": "En marche (retour d'huile)",
+          "running_min_lock": "En marche (durée min.)",
           "running_normal": "En marche",
-          "waiting_min_off": "Égalisation pressions"
+          "waiting_min_off": "Repos sécurité"
         }
       },
       "next_transition_time": {

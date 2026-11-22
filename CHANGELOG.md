@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.9] - 2026-11-22
+
+### Changed
+- **User-Friendly Compressor State Labels (`fsm_state`)**:
+  - Renamed the `fsm_state` diagnostic sensor from `"Danfoss FSM state"` / `"État FSM Danfoss"` to `"Compressor state"` / `"État compresseur"` and simplified its state labels (`Idle` / `Au repos`, `Running (min. lock)` / `En marche (durée min.)`, `Running` / `En marche`, `Safety rest` / `Repos sécurité`).
+
+---
+
 ## [0.3.8] - 2026-11-22
 
 ### Added

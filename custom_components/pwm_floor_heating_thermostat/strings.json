@@ -97,12 +97,12 @@
         "name": "Measured heat loss (Mode A)"
       },
       "fsm_state": {
-        "name": "Danfoss FSM state",
+        "name": "Compressor state",
         "state": {
           "idle": "Idle",
-          "running_min_lock": "Running (oil return lock)",
+          "running_min_lock": "Running (min. lock)",
           "running_normal": "Running",
-          "waiting_min_off": "Pressure equalization"
+          "waiting_min_off": "Safety rest"
         }
       },
       "decision": {
