@@ -1528,6 +1528,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._derivative_smooth = 0.0
         self._was_window_open = self._window_open
 
+        # End of post-airing recovery: realign observer cleanly to stabilized room air
+        if self._window_recovery_until is not None and now >= self._window_recovery_until:
+            self._window_recovery_until = None
+            self._filtered_temp = self._cur_temp
+            self._temp_derivative = 0.0
+            self._derivative_smooth = 0.0
+            self._observer_last_update = now
+
         # Clean filter initialization on first reading (prevents startup spike to 19°C)
         if self._filtered_temp is None or self._observer_last_update is None:
             self._filtered_temp = self._cur_temp
@@ -1536,6 +1544,19 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._observer_last_update = now
             self._temp_projected = self._cur_temp
             self._projection_history.append((now, self._temp_projected))
+            return
+
+        # Freeze Kalata observer during open window & post-airing passive rebound:
+        # cold air cooling/warming against warm slab/walls must not corrupt the slab trajectory
+        in_recovery = self._window_recovery_until is not None and now < self._window_recovery_until
+        if self._window_open or in_recovery:
+            self._temp_derivative = 0.0
+            self._derivative_smooth = 0.0
+            self._observer_last_update = now
+            self._temp_projected = self._filtered_temp
+            self._projection_history.append((now, self._temp_projected))
+            cutoff_proj = now - timedelta(hours=max(4.0, (self._effective_dead_time * 2.0) + 1.0))
+            self._projection_history = [(t, v) for t, v in self._projection_history if t >= cutoff_proj]
             return
 
         dt = (now - self._observer_last_update).total_seconds() / 3600.0  # in hours
@@ -1887,13 +1908,16 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         )
 
         if self._cur_temp is not None:
+            in_recovery = (
+                self._window_recovery_until is not None and now_utc < self._window_recovery_until
+            )
             error = self._target_temp - self._cur_temp
             proj_val = self._temp_projected if self._temp_projected is not None else self._cur_temp
             projected_error = self._target_temp - proj_val
 
             # Rule 0: Emergency comfort deficit bypass (unconditional heating if room falls >= 1.5°C below target,
-            # independent of outdoor sensor availability - F-04)
-            if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE:
+            # independent of outdoor sensor availability - F-04; suspended during post-airing passive rebound)
+            if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE and not in_recovery:
                 should_heat = True
                 self._decision_key = DECISION_EMERGENCY_DEFICIT
                 self._decision_reason = (
@@ -1921,7 +1945,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 )
                 self._current_rule_b_threshold = rule_b_threshold
 
-                if projected_error > rule_b_threshold or error > self._rule_b_min_threshold:
+                if projected_error > rule_b_threshold or (
+                    not in_recovery and error > self._rule_b_min_threshold
+                ):
                     should_heat = True
                     self._decision_key = DECISION_ANTICIPATED_DROP
                     self._decision_reason = (

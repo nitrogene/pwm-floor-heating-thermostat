@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.10] - 2026-11-22
+
+### Fixed
+- **Post-Airing Trajectory & Kalata Observer Freeze**:
+  - Froze the Kalata alpha-beta observer state (`_filtered_temp`, `_temp_derivative`, `_derivative_smooth`) during open-window events and throughout the 30-minute post-airing passive rebound (`POST_AIRING_RECOVERY_MINUTES`), preventing cold air drops from inducing negative projected slopes after windows close.
+  - Suspended Rule 0 (`emergency_deficit`) and raw-error triggers in Rule B during `in_recovery` so the warm slab naturally reheats room air without spurious compressor startups.
+  - Realigned `_filtered_temp` cleanly to stabilized room temperature at the end of the recovery window.
+
+---
+
 ## [0.3.9] - 2026-11-22
 
 ### Changed
