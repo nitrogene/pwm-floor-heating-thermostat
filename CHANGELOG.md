@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.11] - 2026-11-23
+
+### Added
+- **Configurable Post-Airing Stabilization (`post_airing_recovery_minutes` & `post_airing_recovery_tolerance`)**:
+  - Exposed `post_airing_recovery_minutes` (default `45` min, `0–180`, `0` to disable) and `post_airing_recovery_tolerance` (default `0.2` °C, `0.0–2.0`) in `ConfigFlow`, `OptionsFlow`, and climate entity attributes, with detailed UI descriptions in English and French.
+  - Added early-exit convergence: the stabilization window ends early as soon as room temperature recovers within `post_airing_recovery_tolerance` of the pre-airing temperature.
+
+### Fixed
+- **Immediate Recovery Arming on Window Closure**:
+  - Fixed a same-tick race condition where `_check_window_open_state` clearing `window_open` (e.g. on software `window_timeout` expiration) inside `_async_control_heating` left `_window_recovery_until` uninitialized until the next sensor event, allowing `emergency_deficit` or `anticipated_drop` to trigger spuriously.
+
+---
+
 ## [0.3.10] - 2026-11-22
 
 ### Fixed

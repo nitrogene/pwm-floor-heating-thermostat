@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-INTEGRATION_VERSION = "0.3.10"
+INTEGRATION_VERSION = "0.3.11"
 
 
 def get_integration_version() -> str:
@@ -76,10 +76,14 @@ CONF_WINDOW_DETECTION_SENSOR = "window_detection_sensor"
 CONF_WINDOW_SENSOR = "window_sensor"
 CONF_WINDOW_DROP_THRESHOLD = "window_drop_threshold"
 CONF_WINDOW_TIMEOUT = "window_timeout"
+CONF_POST_AIRING_RECOVERY_MINUTES = "post_airing_recovery_minutes"
+CONF_POST_AIRING_RECOVERY_TOLERANCE = "post_airing_recovery_tolerance"
 
 DEFAULT_WINDOW_DETECTION = True
 DEFAULT_WINDOW_DROP_THRESHOLD = 0.4  # Drop of 0.4°C in <= 15 min
 DEFAULT_WINDOW_TIMEOUT = timedelta(minutes=30)
+DEFAULT_POST_AIRING_RECOVERY_MINUTES = 45
+DEFAULT_POST_AIRING_RECOVERY_TOLERANCE = 0.2
 
 # Temperature presets (Comfort, Eco, Away)
 CONF_ECO_TEMP = "eco_temp"
@@ -124,7 +128,7 @@ FSM_WAITING_MIN_OFF = "waiting_min_off"          # Heating stopped, locked for 1
 OUTDOOR_PRECHARGE_MAX_TEMP = 12.0               # Outdoor cutoff above which off-peak precharge is inhibited (°C)
 COMFORT_SAFETY_DEFICIT_OVERRIDE = 0.8           # Room deficit below target that overrides peak-hour quota block (°C)
 WINDOW_DERIVATIVE_THRESHOLD = -1.5              # Negative hourly derivative threshold for rapid ventilation (°C/h)
-POST_AIRING_RECOVERY_MINUTES = 30               # Post-ventilation thermal recovery damping window (minutes)
+POST_AIRING_RECOVERY_MINUTES = DEFAULT_POST_AIRING_RECOVERY_MINUTES  # Backward-compatible alias
 POST_AIRING_MAX_DERIVATIVE = 0.05               # Max allowed positive derivative during post-airing recovery (°C/h)
 ATTR_COUNTERS_DATE = "counters_date"
 ATTR_AMBIENT_TRIM_RATIO = "ambient_trim_ratio"

@@ -32,9 +32,15 @@
           "comfort_temp": "Comfort Preset Temperature (°C)",
           "enforce_daily_quota_sensor": "Daily Quota Override Switch / Sensor",
           "window_detection_sensor": "Window Detection Master Switch / Sensor",
+          "post_airing_recovery_minutes": "Post-Airing Stabilization Duration (minutes)",
+          "post_airing_recovery_tolerance": "Post-Airing Early-Exit Tolerance (°C)",
           "min_cycle_duration": "Minimum Compressor Runtime Lock (minutes)",
           "min_off_cycle_duration": "Minimum Compressor Rest Lock (minutes)",
           "max_cycles_per_day": "Maximum Compressor Cycles Budget per Day"
+        },
+        "data_description": {
+          "post_airing_recovery_minutes": "Maximum delay (0 to disable) after window closure during which the thermal observer stays frozen so room air can passively re-equilibrate with walls and slab without triggering an unnecessary peak-hour heating cycle.",
+          "post_airing_recovery_tolerance": "Maximum margin below the pre-airing temperature at which the stabilization window ends early once the room has passively recovered (e.g., 0.2 °C)."
         }
       }
     },
@@ -88,9 +94,15 @@
           "comfort_temp": "Comfort Preset Temperature (°C)",
           "enforce_daily_quota_sensor": "Daily Quota Override Switch / Sensor",
           "window_detection_sensor": "Window Detection Master Switch / Sensor",
+          "post_airing_recovery_minutes": "Post-Airing Stabilization Duration (minutes)",
+          "post_airing_recovery_tolerance": "Post-Airing Early-Exit Tolerance (°C)",
           "min_cycle_duration": "Minimum Compressor Runtime Lock (minutes)",
           "min_off_cycle_duration": "Minimum Compressor Rest Lock (minutes)",
           "max_cycles_per_day": "Maximum Compressor Cycles Budget per Day"
+        },
+        "data_description": {
+          "post_airing_recovery_minutes": "Maximum delay (0 to disable) after window closure during which the thermal observer stays frozen so room air can passively re-equilibrate with walls and slab without triggering an unnecessary peak-hour heating cycle.",
+          "post_airing_recovery_tolerance": "Maximum margin below the pre-airing temperature at which the stabilization window ends early once the room has passively recovered (e.g., 0.2 °C)."
         }
       }
     }

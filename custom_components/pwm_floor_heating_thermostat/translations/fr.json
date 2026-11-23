@@ -33,9 +33,15 @@
           "comfort_temp": "Température consigne Confort (°C)",
           "enforce_daily_quota_sensor": "Interrupteur / Capteur d'activation du quota journalier",
           "window_detection_sensor": "Interrupteur / Capteur d'activation de la détection d'aération",
+          "post_airing_recovery_minutes": "Durée de stabilisation post-aération (minutes)",
+          "post_airing_recovery_tolerance": "Tolérance de sortie anticipée post-aération (°C)",
           "min_cycle_duration": "Durée minimale de marche compresseur (minutes)",
           "min_off_cycle_duration": "Durée minimale de repos compresseur (minutes)",
           "max_cycles_per_day": "Budget maximal de cycles compresseur par jour"
+        },
+        "data_description": {
+          "post_airing_recovery_minutes": "Délai maximal (0 pour désactiver) après la fermeture de fenêtre pendant lequel l'observateur reste figé pour laisser l'air se rééquilibrer avec les murs et la dalle sans déclencher de cycle inutile en Heures Pleines.",
+          "post_airing_recovery_tolerance": "Écart maximal par rapport à la température d'avant aération permettant de terminer la phase de stabilisation plus tôt dès que la pièce a récupéré (ex. 0,2 °C)."
         }
       }
     },
@@ -89,9 +95,15 @@
           "comfort_temp": "Température consigne Confort (°C)",
           "enforce_daily_quota_sensor": "Interrupteur / Capteur d'activation du quota journalier",
           "window_detection_sensor": "Interrupteur / Capteur d'activation de la détection d'aération",
+          "post_airing_recovery_minutes": "Durée de stabilisation post-aération (minutes)",
+          "post_airing_recovery_tolerance": "Tolérance de sortie anticipée post-aération (°C)",
           "min_cycle_duration": "Durée minimale de marche compresseur (minutes)",
           "min_off_cycle_duration": "Durée minimale de repos compresseur (minutes)",
           "max_cycles_per_day": "Budget maximal de cycles compresseur par jour"
+        },
+        "data_description": {
+          "post_airing_recovery_minutes": "Délai maximal (0 pour désactiver) après la fermeture de fenêtre pendant lequel l'observateur reste figé pour laisser l'air se rééquilibrer avec les murs et la dalle sans déclencher de cycle inutile en Heures Pleines.",
+          "post_airing_recovery_tolerance": "Écart maximal par rapport à la température d'avant aération permettant de terminer la phase de stabilisation plus tôt dès que la pièce a récupéré (ex. 0,2 °C)."
         }
       }
     }

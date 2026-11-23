@@ -111,6 +111,8 @@ from .const import (
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
     CONF_OUTDOOR_SENSOR,
     CONF_PEAK_MAX_RUN_DURATION,
+    CONF_POST_AIRING_RECOVERY_MINUTES,
+    CONF_POST_AIRING_RECOVERY_TOLERANCE,
     CONF_POWER_WATTS,
     CONF_RULE_B_MIN_THRESHOLD,
     CONF_SENSOR_STALE_TIMEOUT_MINUTES,
@@ -169,6 +171,8 @@ from .const import (
     DEFAULT_NAME,
     DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_PEAK_MAX_RUN_DURATION,
+    DEFAULT_POST_AIRING_RECOVERY_MINUTES,
+    DEFAULT_POST_AIRING_RECOVERY_TOLERANCE,
     DEFAULT_POWER_WATTS,
     DEFAULT_RULE_B_MIN_THRESHOLD,
     DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
@@ -193,7 +197,6 @@ from .const import (
     MIN_HEAT_LOSS_WK,
     MULTI_ZONE_STARTUP_COOLDOWN_SECONDS,
     POST_AIRING_MAX_DERIVATIVE,
-    POST_AIRING_RECOVERY_MINUTES,
     SOLAR_MAX_CREDIT_RATIO,
     SOLAR_MORNING_CUTOFF_HOUR,
     WEATHER_FORECAST_CACHE_TTL_SECONDS,
@@ -237,6 +240,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_WINDOW_SENSOR): cv.entity_id,
         vol.Optional(CONF_WINDOW_DROP_THRESHOLD, default=DEFAULT_WINDOW_DROP_THRESHOLD): vol.Coerce(float),
         vol.Optional(CONF_WINDOW_TIMEOUT, default=DEFAULT_WINDOW_TIMEOUT): cv.time_period,
+        vol.Optional(
+            CONF_POST_AIRING_RECOVERY_MINUTES,
+            default=DEFAULT_POST_AIRING_RECOVERY_MINUTES,
+        ): vol.All(vol.Coerce(int), vol.Range(min=0, max=180)),
+        vol.Optional(
+            CONF_POST_AIRING_RECOVERY_TOLERANCE,
+            default=DEFAULT_POST_AIRING_RECOVERY_TOLERANCE,
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
         vol.Optional(CONF_ECO_TEMP, default=DEFAULT_ECO_TEMP): vol.Coerce(float),
         vol.Optional(CONF_AWAY_TEMP, default=DEFAULT_AWAY_TEMP): vol.Coerce(float),
         vol.Optional(CONF_COMFORT_TEMP): vol.Coerce(float),
@@ -445,6 +456,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._window_sensor = config.get(CONF_WINDOW_SENSOR)
         self._window_drop_threshold = float(config.get(CONF_WINDOW_DROP_THRESHOLD, DEFAULT_WINDOW_DROP_THRESHOLD))
         self._window_timeout = _parse_timedelta(config.get(CONF_WINDOW_TIMEOUT), DEFAULT_WINDOW_TIMEOUT)
+        self._post_airing_recovery_minutes = int(
+            config.get(CONF_POST_AIRING_RECOVERY_MINUTES, DEFAULT_POST_AIRING_RECOVERY_MINUTES)
+        )
+        self._post_airing_recovery_tolerance = float(
+            config.get(CONF_POST_AIRING_RECOVERY_TOLERANCE, DEFAULT_POST_AIRING_RECOVERY_TOLERANCE)
+        )
         self._window_open = False
         self._window_open_time: datetime | None = None
 
@@ -1100,6 +1117,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "daily_quota_blocked": self._quota_blocked,
             "window_detection_active": window_detection_active,
             "window_open_detected": self._window_open,
+            CONF_POST_AIRING_RECOVERY_MINUTES: self._post_airing_recovery_minutes,
+            CONF_POST_AIRING_RECOVERY_TOLERANCE: self._post_airing_recovery_tolerance,
             "heat_loss_measured_wk": self._heat_loss_measured_wk,
             "heat_loss_samples_count": self._heat_loss_samples_count,
             "comfort_temp": self._comfort_temp,
@@ -1505,6 +1524,32 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                             self._derivative_smooth,
                         )
 
+        self._handle_window_recovery_state(now_utc)
+
+    def _handle_window_recovery_state(self, now: datetime) -> None:
+        """Arm or clear post-airing recovery damping on window closure and early convergence."""
+        if self._was_window_open and not self._window_open:
+            if self._post_airing_recovery_minutes > 0:
+                self._window_recovery_until = now + timedelta(minutes=self._post_airing_recovery_minutes)
+            self._temp_derivative = 0.0
+            self._derivative_smooth = 0.0
+        self._was_window_open = self._window_open
+
+        if self._window_recovery_until is not None:
+            timeout_reached = now >= self._window_recovery_until
+            recovered_early = (
+                self._cur_temp is not None
+                and self._filtered_temp is not None
+                and self._cur_temp >= (self._filtered_temp - self._post_airing_recovery_tolerance)
+            )
+            if timeout_reached or recovered_early:
+                self._window_recovery_until = None
+                if self._cur_temp is not None:
+                    self._filtered_temp = self._cur_temp
+                self._temp_derivative = 0.0
+                self._derivative_smooth = 0.0
+                self._observer_last_update = now
+
     def _update_trajectory_projection(self, now: datetime) -> None:
         """Estimate filtered state and project slab trajectory at t + theta using continuous-discrete alpha-beta observer."""
         if self._cur_temp is None:
@@ -1520,21 +1565,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         cutoff_15m = now - timedelta(minutes=15)
         self._temp_history = [(t, v) for t, v in self._temp_history if t >= cutoff_15m]
 
-        # Detect window closure transition to initiate thermal rebound damping
-        if self._was_window_open and not self._window_open:
-            self._window_recovery_until = now + timedelta(minutes=POST_AIRING_RECOVERY_MINUTES)
-            # Reset derivative on window closure: air warming back against slab is not slab overheating
-            self._temp_derivative = 0.0
-            self._derivative_smooth = 0.0
-        self._was_window_open = self._window_open
-
-        # End of post-airing recovery: realign observer cleanly to stabilized room air
-        if self._window_recovery_until is not None and now >= self._window_recovery_until:
-            self._window_recovery_until = None
-            self._filtered_temp = self._cur_temp
-            self._temp_derivative = 0.0
-            self._derivative_smooth = 0.0
-            self._observer_last_update = now
+        self._handle_window_recovery_state(now)
 
         # Clean filter initialization on first reading (prevents startup spike to 19°C)
         if self._filtered_temp is None or self._observer_last_update is None:

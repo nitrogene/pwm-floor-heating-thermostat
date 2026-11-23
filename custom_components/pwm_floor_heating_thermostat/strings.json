@@ -23,7 +23,13 @@
           "heat_loss_confidence_samples": "Mode B Confidence Samples for Direct Application",
           "auto_calibrate_dead_time": "Mode B Auto-Adaptation of Dead Time Theta",
           "weather_entity": "Weather Service Entity (for 24h rolling forecast)",
-          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota"
+          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota",
+          "post_airing_recovery_minutes": "Post-Airing Stabilization Duration (minutes)",
+          "post_airing_recovery_tolerance": "Post-Airing Early-Exit Tolerance (°C)"
+        },
+        "data_description": {
+          "post_airing_recovery_minutes": "Maximum delay (0 to disable) after window closure during which the thermal observer stays frozen so room air can passively re-equilibrate with walls and slab without triggering an unnecessary peak-hour heating cycle.",
+          "post_airing_recovery_tolerance": "Maximum margin below the pre-airing temperature at which the stabilization window ends early once the room has passively recovered (e.g., 0.2 °C)."
         }
       }
     },
@@ -68,7 +74,13 @@
           "comfort_safety_deficit": "Comfort Safety Deficit Threshold (°C)",
           "rule_b_min_threshold": "Rule B Minimum Anticipation Threshold (°C)",
           "weather_entity": "Weather Service Entity",
-          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota"
+          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota",
+          "post_airing_recovery_minutes": "Post-Airing Stabilization Duration (minutes)",
+          "post_airing_recovery_tolerance": "Post-Airing Early-Exit Tolerance (°C)"
+        },
+        "data_description": {
+          "post_airing_recovery_minutes": "Maximum delay (0 to disable) after window closure during which the thermal observer stays frozen so room air can passively re-equilibrate with walls and slab without triggering an unnecessary peak-hour heating cycle.",
+          "post_airing_recovery_tolerance": "Maximum margin below the pre-airing temperature at which the stabilization window ends early once the room has passively recovered (e.g., 0.2 °C)."
         }
       }
     }

@@ -46,6 +46,8 @@ from .const import (
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
     CONF_OUTDOOR_SENSOR,
     CONF_PEAK_MAX_RUN_DURATION,
+    CONF_POST_AIRING_RECOVERY_MINUTES,
+    CONF_POST_AIRING_RECOVERY_TOLERANCE,
     CONF_POWER_WATTS,
     CONF_RULE_B_MIN_THRESHOLD,
     CONF_SENSOR_STALE_TIMEOUT_MINUTES,
@@ -77,6 +79,8 @@ from .const import (
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_NAME,
     DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
+    DEFAULT_POST_AIRING_RECOVERY_MINUTES,
+    DEFAULT_POST_AIRING_RECOVERY_TOLERANCE,
     DEFAULT_POWER_WATTS,
     DEFAULT_RULE_B_MIN_THRESHOLD,
     DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
@@ -284,6 +288,30 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
                 ),
                 vol.Optional(
+                    CONF_POST_AIRING_RECOVERY_MINUTES,
+                    default=DEFAULT_POST_AIRING_RECOVERY_MINUTES,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=180,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_POST_AIRING_RECOVERY_TOLERANCE,
+                    default=DEFAULT_POST_AIRING_RECOVERY_TOLERANCE,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=2.0,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
                     CONF_MIN_CYCLE_DURATION,
                     default=30,
                 ): selector.NumberSelector(
@@ -460,6 +488,40 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     description={"suggested_value": curr.get(CONF_WINDOW_SENSOR)},
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
+                ),
+                vol.Required(
+                    CONF_POST_AIRING_RECOVERY_MINUTES,
+                    default=int(
+                        curr.get(
+                            CONF_POST_AIRING_RECOVERY_MINUTES,
+                            DEFAULT_POST_AIRING_RECOVERY_MINUTES,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=180,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_POST_AIRING_RECOVERY_TOLERANCE,
+                    default=float(
+                        curr.get(
+                            CONF_POST_AIRING_RECOVERY_TOLERANCE,
+                            DEFAULT_POST_AIRING_RECOVERY_TOLERANCE,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=2.0,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 ),
                 vol.Required(
                     CONF_COMFORT_TEMP,
