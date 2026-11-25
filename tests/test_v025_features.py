@@ -10,7 +10,6 @@ from custom_components.pwm_floor_heating_thermostat.const import (
     AMBIENT_TRIM_GAIN,
     AMBIENT_TRIM_MAX,
     AMBIENT_TRIM_MIN,
-    ATTR_AMBIENT_TRIM_RATIO,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
     ATTR_SOLAR_CREDIT_KWH,
     AUTO_CALIBRATE_MAX_DEVIATION,
@@ -205,12 +204,10 @@ def test_thermostat_extra_state_attributes_v025():
     thermostat._cur_temp = 18.5
     thermostat._outdoor_temp = 5.0
     thermostat._target_temp = 19.0
-    thermostat._ambient_trim_ratio = 1.075
     thermostat._solar_credit_kwh = 1.2
     thermostat._effective_heat_loss = 52.0
 
     attrs = thermostat.extra_state_attributes
-    assert attrs[ATTR_AMBIENT_TRIM_RATIO] == 1.075
     assert attrs[ATTR_SOLAR_CREDIT_KWH] == 1.2
     assert attrs[ATTR_EFFECTIVE_HEAT_LOSS_WK] == 52.0
     assert attrs["auto_calibrate_heat_loss"] is True

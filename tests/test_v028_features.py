@@ -20,12 +20,14 @@ from custom_components.pwm_floor_heating_thermostat.const import (
     CONF_DRY_RUN,
     CONF_HEAT_LOSS,
     CONF_HEATER,
+    CONF_OFF_PEAK_COMFORT_MARGIN,
     CONF_OUTDOOR_SENSOR,
     CONF_POWER_WATTS,
     CONF_SLAB_TIME_CONSTANT,
     CONF_TARGET_SENSOR,
-    CONF_USE_WEATHER_FORECAST_AVERAGE,
     CONF_WEATHER_ENTITY,
+    DEMAND_CURVE_TIER_OUTDOOR_PERSISTENCE,
+    DEMAND_CURVE_TIER_WEATHER_API,
     DOMAIN,
 )
 from custom_components.pwm_floor_heating_thermostat.coordinator import (
@@ -96,12 +98,11 @@ def test_coordinator_initialization_and_sensor_sync(base_config):
 
 
 def test_weather_forecast_24h_average(base_config):
-    """Verify rolling 24h weather forecast average computation and quota calculation."""
+    """Verify rolling 24h weather forecast curve computation and forecast energy need."""
     async def _test():
         hass = MagicMock()
         config = dict(base_config)
         config[CONF_WEATHER_ENTITY] = "weather.home"
-        config[CONF_USE_WEATHER_FORECAST_AVERAGE] = True
 
         thermostat = PwmFloorHeatingThermostat(hass, config)
         thermostat._cur_temp = 19.0
@@ -114,7 +115,7 @@ def test_weather_forecast_24h_average(base_config):
         weather_state.attributes = {}
 
         # 24 forecast entries averaging exactly 10.0°C (alternating 9°C and 11°C)
-        now = dt_util.now()
+        now = dt_util.utcnow()
         forecasts = []
         for i in range(24):
             forecasts.append({
@@ -128,34 +129,33 @@ def test_weather_forecast_24h_average(base_config):
 
         await thermostat._async_control_heating()
 
-        # Average outdoor temperature should be 10.0°C
+        # Average outdoor temperature should be 10.0°C (Tier 1 weather_api)
         assert thermostat._forecast_outdoor_temp_24h == 10.0
         assert thermostat._weather_outage_fallback_active is False
+        assert thermostat._demand_curve_tier == DEMAND_CURVE_TIER_WEATHER_API
 
-        # Delta T = 19.0 - 10.0 = 9.0 K (instead of 19.0 - 5.0 = 14.0 K)
-        # base_energy = (15.0 W/K * 1.0 * 9.0 K * 24h) / 1000 = 3.24 kWh
-        assert thermostat._energy_needed_kwh == 3.24
+        # Delta T = 19.0 - 10.0 = 9.0 K -> (15.0 W/K * 9.0 K * 24h) / 1000 = 3.24 kWh
+        assert thermostat._forecast_energy_need_24h_kwh == 3.24
 
         attrs = thermostat.extra_state_attributes
         assert attrs["forecast_outdoor_temp_24h"] == 10.0
         assert attrs["weather_outage_fallback_active"] is False
+        assert attrs["forecast_energy_need_24h_kwh"] == 3.24
 
     asyncio.run(_test())
 
 
-def test_weather_outage_fallback_with_previous_day_quota(base_config):
-    """Verify graceful fallback to previous day quota +5% when weather entity fails."""
+def test_weather_outage_fallback_to_outdoor_persistence(base_config):
+    """Verify graceful fallback to Tier 2 outdoor_sensor persistence when weather API fails."""
     async def _test():
         hass = MagicMock()
         config = dict(base_config)
         config[CONF_WEATHER_ENTITY] = "weather.home"
-        config[CONF_USE_WEATHER_FORECAST_AVERAGE] = True
 
         thermostat = PwmFloorHeatingThermostat(hass, config)
         thermostat._cur_temp = 19.0
         thermostat._target_temp = 19.0
         thermostat._outdoor_temp = 8.0
-        thermostat._prev_day_energy_quota_kwh = 10.0  # Previous day was 10.0 kWh
 
         # Weather entity is unavailable
         st_unavailable = MagicMock()
@@ -164,26 +164,26 @@ def test_weather_outage_fallback_with_previous_day_quota(base_config):
 
         await thermostat._async_control_heating()
 
-        # Should fall back to 10.0 * 1.05 = 10.5 kWh
+        # Tier 2 fallback: (15.0 W/K * (19.0 - 8.0) * 24h) / 1000 = 3.96 kWh
         assert thermostat._weather_outage_fallback_active is True
-        assert thermostat._forecast_outdoor_temp_24h is None
-        assert thermostat._energy_needed_kwh == 10.5
+        assert thermostat._demand_curve_tier == DEMAND_CURVE_TIER_OUTDOOR_PERSISTENCE
+        assert thermostat._forecast_outdoor_temp_24h == 8.0
+        assert thermostat._forecast_energy_need_24h_kwh == 3.96
 
         attrs = thermostat.extra_state_attributes
         assert attrs["weather_outage_fallback_active"] is True
-        assert attrs["energy_quota_24h_kwh"] == 10.5
+        assert attrs["forecast_energy_need_24h_kwh"] == 3.96
 
     asyncio.run(_test())
 
 
-def test_unserved_quota_carryover_at_midnight(base_config):
-    """Verify unserved quota is carried over to the next day at midnight reset."""
+def test_midnight_cycle_counter_reset(base_config):
+    """Verify midnight resets daily mechanical cycle counters without legacy carryover."""
     async def _test():
         hass = MagicMock()
         thermostat = PwmFloorHeatingThermostat(hass, base_config)
-        thermostat._hours_needed_24h = 4.0
         thermostat._hours_run_today = 1.5
-        thermostat._energy_needed_kwh = 12.0
+        thermostat._cycles_today = 4
         thermostat._outdoor_temp = 10.0
         thermostat._cur_temp = 19.0
         thermostat._target_temp = 19.0
@@ -194,31 +194,26 @@ def test_unserved_quota_carryover_at_midnight(base_config):
 
         await thermostat._async_control_heating()
 
-        # Unserved was 4.0 - 1.5 = 2.5h, capped at MAX_UNSERVED_QUOTA_CARRYOVER_HOURS (2.0h)
-        assert thermostat._unserved_quota_carryover_hours == 2.0
-        assert thermostat._prev_day_energy_quota_kwh == 12.0
         assert thermostat._hours_run_today == 0.0
-
-        attrs = thermostat.extra_state_attributes
-        assert attrs["unserved_quota_carryover_hours"] == 2.0
+        assert thermostat._cycles_today == 0
 
     asyncio.run(_test())
 
 
 def test_config_flow_and_options_flow_weather_options(base_config):
-    """Verify weather forecast options in config flow and options flow."""
+    """Verify mandatory weather_entity and off_peak_comfort_margin in config and options flows."""
     async def _test():
         flow = PwmFloorHeatingConfigFlow()
         flow.hass = MagicMock()
 
         user_input = dict(base_config)
         user_input[CONF_WEATHER_ENTITY] = "weather.home"
-        user_input[CONF_USE_WEATHER_FORECAST_AVERAGE] = True
+        user_input[CONF_OFF_PEAK_COMFORT_MARGIN] = 0.3
 
         res = await flow.async_step_user(user_input)
         assert res["type"] == "create_entry"
         assert res["data"][CONF_WEATHER_ENTITY] == "weather.home"
-        assert res["data"][CONF_USE_WEATHER_FORECAST_AVERAGE] is True
+        assert res["data"][CONF_OFF_PEAK_COMFORT_MARGIN] == 0.3
 
         # Test options flow
         entry = MagicMock()
@@ -229,10 +224,10 @@ def test_config_flow_and_options_flow_weather_options(base_config):
         options_flow.hass = MagicMock()
 
         opt_input = dict(user_input)
-        opt_input[CONF_USE_WEATHER_FORECAST_AVERAGE] = False
+        opt_input[CONF_OFF_PEAK_COMFORT_MARGIN] = 0.25
         res_opt = await options_flow.async_step_init(opt_input)
         assert res_opt["type"] == "create_entry"
-        assert res_opt["data"][CONF_USE_WEATHER_FORECAST_AVERAGE] is False
+        assert res_opt["data"][CONF_OFF_PEAK_COMFORT_MARGIN] == 0.25
 
     asyncio.run(_test())
 
@@ -258,24 +253,24 @@ def test_weather_forecast_cache_ttl(base_config):
 
         config = dict(base_config)
         config[CONF_WEATHER_ENTITY] = "weather.home"
-        config[CONF_USE_WEATHER_FORECAST_AVERAGE] = True
         thermostat = PwmFloorHeatingThermostat(hass, config)
 
         # First call fetches from service
-        avg1 = await thermostat._async_get_weather_forecast_24h_average()
-        assert avg1 == 10.0
+        curve1 = await thermostat._async_get_weather_hourly_forecast(t0)
+        assert len(curve1) == 6
+        assert curve1[0][1] == 10.0
         assert hass.services.async_call.await_count == 1
 
         # Second call within TTL hits cache without calling service again
-        avg2 = await thermostat._async_get_weather_forecast_24h_average()
-        assert avg2 == 10.0
+        curve2 = await thermostat._async_get_weather_hourly_forecast(t0 + timedelta(minutes=5))
+        assert len(curve2) == 6
         assert hass.services.async_call.await_count == 1
 
         # State change invalidates cache
         thermostat.hass = hass
         thermostat._async_weather_entity_changed(None)
-        avg3 = await thermostat._async_get_weather_forecast_24h_average()
-        assert avg3 == 10.0
+        curve3 = await thermostat._async_get_weather_hourly_forecast(t0 + timedelta(minutes=6))
+        assert len(curve3) == 6
         assert hass.services.async_call.await_count == 2
 
     asyncio.run(_test())

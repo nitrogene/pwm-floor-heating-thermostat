@@ -56,16 +56,14 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    AMBIENT_TRIM_GAIN,
-    AMBIENT_TRIM_MAX,
-    AMBIENT_TRIM_MIN,
-    ATTR_AMBIENT_TRIM_RATIO,
     ATTR_COUNTERS_DATE,
     ATTR_DEAD_TIME_MEASURED_HOURS,
     ATTR_DEAD_TIME_SAMPLES_COUNT,
+    ATTR_DEMAND_CURVE_TIER,
     ATTR_EARLIEST_TRANSITION_TIME,
     ATTR_EFFECTIVE_DEAD_TIME_HOURS,
     ATTR_EFFECTIVE_HEAT_LOSS_WK,
+    ATTR_FORECAST_ENERGY_NEED_24H_KWH,
     ATTR_FORECAST_OUTDOOR_TEMP_24H,
     ATTR_HEAT_LOSS_CONFIDENCE_SAMPLES,
     ATTR_KALATA_PROCESS_NOISE,
@@ -73,10 +71,12 @@ from .const import (
     ATTR_NEXT_TRANSITION_REASON,
     ATTR_NEXT_TRANSITION_TIME,
     ATTR_NEXT_TRANSITION_TYPE,
+    ATTR_OFF_PEAK_COMFORT_MARGIN,
+    ATTR_PLANNED_HEATING_HOURS,
     ATTR_RULE_B_THRESHOLD,
     ATTR_SENSOR_STALE,
+    ATTR_SLAB_ENERGY_IN_TRANSIT_KWH,
     ATTR_SOLAR_CREDIT_KWH,
-    ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS,
     ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE,
     ATTR_WIND_FACTOR,
     ATTR_WIND_SPEED,
@@ -90,8 +90,6 @@ from .const import (
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
     CONF_ECO_TEMP,
-    CONF_ENFORCE_DAILY_QUOTA,
-    CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HARD_OVERSHOOT_MARGIN,
     CONF_HEAT_LOSS,
@@ -106,6 +104,9 @@ from .const import (
     CONF_MIN_FLOOR_TEMP,
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
+    CONF_OFF_PEAK_COMFORT_MARGIN,
+    CONF_OFF_PEAK_DURATION_HOURS,
+    CONF_OFF_PEAK_END_ENTITY,
     CONF_OFF_PEAK_SENSOR,
     CONF_OFF_PEAK_START_ENTITY,
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
@@ -121,7 +122,6 @@ from .const import (
     CONF_STAGGER_DELAY,
     CONF_TARGET_SENSOR,
     CONF_THERMAL_RUNAWAY_DERIVATIVE,
-    CONF_USE_WEATHER_FORECAST_AVERAGE,
     CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
@@ -134,16 +134,17 @@ from .const import (
     DECISION_ANTICIPATED_DROP,
     DECISION_CYCLE_BUDGET_EXHAUSTED,
     DECISION_EMERGENCY_DEFICIT,
+    DECISION_ENERGY_BALANCE_SATISFIED,
     DECISION_FLOOR_FREEZE_GUARD,
     DECISION_FLOOR_MAX_CUTOFF,
     DECISION_HARD_OVERSHOOT_CUTOFF,
     DECISION_IDLE,
     DECISION_MAX_RUN_CAP,
     DECISION_OFF,
+    DECISION_OFF_PEAK_DEFERRED,
     DECISION_OFF_PEAK_PRECHARGE,
     DECISION_OVERSHOOT_CUTOFF,
     DECISION_PEAK_CYCLE_CAP,
-    DECISION_QUOTA_REACHED,
     DECISION_SENSOR_STALE,
     DECISION_STAGGERED_STARTUP,
     DECISION_THERMAL_RUNAWAY,
@@ -155,7 +156,6 @@ from .const import (
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
     DEFAULT_ECO_TEMP,
-    DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HARD_OVERSHOOT_MARGIN,
     DEFAULT_HEAT_LOSS,
     DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
@@ -169,6 +169,8 @@ from .const import (
     DEFAULT_MIN_OFF,
     DEFAULT_MIN_TEMP,
     DEFAULT_NAME,
+    DEFAULT_OFF_PEAK_COMFORT_MARGIN,
+    DEFAULT_OFF_PEAK_DURATION_HOURS,
     DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_PEAK_MAX_RUN_DURATION,
     DEFAULT_POST_AIRING_RECOVERY_MINUTES,
@@ -180,10 +182,12 @@ from .const import (
     DEFAULT_STAGGER_DELAY,
     DEFAULT_TARGET_TEMP,
     DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
-    DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
     DEFAULT_WINDOW_DROP_THRESHOLD,
     DEFAULT_WINDOW_TIMEOUT,
+    DEMAND_CURVE_TIER_KALATA_DERIVATIVE,
+    DEMAND_CURVE_TIER_OUTDOOR_PERSISTENCE,
+    DEMAND_CURVE_TIER_WEATHER_API,
     DOMAIN,
     EMERGENCY_COMFORT_DEFICIT_OVERRIDE,
     FSM_IDLE,
@@ -192,7 +196,7 @@ from .const import (
     FSM_WAITING_MIN_OFF,
     INTEGRATION_VERSION,
     MAX_RULE_B_THRESHOLD,
-    MAX_UNSERVED_QUOTA_CARRYOVER_HOURS,
+    MIN_EFFECTIVE_THERMAL_CAPACITY_KWH_K,
     MIN_HEAT_LOSS_RATIO,
     MIN_HEAT_LOSS_WK,
     MULTI_ZONE_STARTUP_COOLDOWN_SECONDS,
@@ -217,8 +221,16 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_HEATER): cv.entity_id,
         vol.Required(CONF_TARGET_SENSOR): cv.entity_id,
         vol.Required(CONF_OUTDOOR_SENSOR): cv.entity_id,
+        vol.Required(CONF_WEATHER_ENTITY): cv.entity_id,
         vol.Optional(CONF_OFF_PEAK_SENSOR): cv.entity_id,
         vol.Optional(CONF_OFF_PEAK_START_ENTITY): cv.entity_id,
+        vol.Optional(CONF_OFF_PEAK_END_ENTITY): cv.entity_id,
+        vol.Optional(
+            CONF_OFF_PEAK_DURATION_HOURS, default=DEFAULT_OFF_PEAK_DURATION_HOURS
+        ): vol.Coerce(float),
+        vol.Optional(
+            CONF_OFF_PEAK_COMFORT_MARGIN, default=DEFAULT_OFF_PEAK_COMFORT_MARGIN
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
         vol.Optional(CONF_HEURES_CREUSES_SENSOR): cv.entity_id,
         vol.Optional(CONF_FLOOR_TEMP_SENSOR): cv.entity_id,
         vol.Optional(CONF_MAX_FLOOR_TEMP, default=DEFAULT_MAX_FLOOR_TEMP): vol.Coerce(float),
@@ -233,8 +245,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_MIN_CYCLE_DURATION, default=DEFAULT_MIN_CYCLE): cv.time_period,
         vol.Optional(CONF_MIN_OFF_CYCLE_DURATION, default=DEFAULT_MIN_OFF): cv.time_period,
         vol.Optional(CONF_MAX_CYCLES_PER_DAY, default=DEFAULT_MAX_CYCLES): vol.Coerce(int),
-        vol.Optional(CONF_ENFORCE_DAILY_QUOTA, default=DEFAULT_ENFORCE_DAILY_QUOTA): cv.boolean,
-        vol.Optional(CONF_ENFORCE_DAILY_QUOTA_SENSOR): cv.entity_id,
         vol.Optional(CONF_WINDOW_DETECTION, default=DEFAULT_WINDOW_DETECTION): cv.boolean,
         vol.Optional(CONF_WINDOW_DETECTION_SENSOR): cv.entity_id,
         vol.Optional(CONF_WINDOW_SENSOR): cv.entity_id,
@@ -278,10 +288,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(
             CONF_RULE_B_MIN_THRESHOLD, default=DEFAULT_RULE_B_MIN_THRESHOLD
         ): vol.Coerce(float),
-        vol.Optional(CONF_WEATHER_ENTITY): cv.entity_id,
-        vol.Optional(
-            CONF_USE_WEATHER_FORECAST_AVERAGE, default=DEFAULT_USE_WEATHER_FORECAST_AVERAGE
-        ): cv.boolean,
         vol.Optional(
             CONF_SENSOR_STALE_TIMEOUT_MINUTES, default=DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES
         ): cv.positive_int,
@@ -406,18 +412,28 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._outdoor_sensor = config[CONF_OUTDOOR_SENSOR]
         self._off_peak_sensor = config.get(CONF_OFF_PEAK_SENSOR) or config.get(CONF_HEURES_CREUSES_SENSOR)
         self._off_peak_start_entity = config.get(CONF_OFF_PEAK_START_ENTITY)
+        self._off_peak_end_entity = config.get(CONF_OFF_PEAK_END_ENTITY)
+        self._off_peak_duration_hours = float(
+            config.get(CONF_OFF_PEAK_DURATION_HOURS, DEFAULT_OFF_PEAK_DURATION_HOURS)
+        )
+        self._off_peak_comfort_margin = float(
+            config.get(CONF_OFF_PEAK_COMFORT_MARGIN, DEFAULT_OFF_PEAK_COMFORT_MARGIN)
+        )
         self._dry_run = bool(config.get(CONF_DRY_RUN, DEFAULT_DRY_RUN))
         self._observed_heater = config.get(CONF_OBSERVED_HEATER)
         self._weather_entity = config.get(CONF_WEATHER_ENTITY)
-        self._use_weather_forecast_average = bool(
-            config.get(CONF_USE_WEATHER_FORECAST_AVERAGE, DEFAULT_USE_WEATHER_FORECAST_AVERAGE)
-        )
         self._forecast_outdoor_temp_24h: float | None = None
-        self._weather_forecast_cache_avg: float | None = None
+        self._weather_forecast_curve: list[tuple[datetime, float]] = []
         self._weather_forecast_cache_ts: datetime | None = None
         self._weather_outage_fallback_active: bool = False
-        self._unserved_quota_carryover_hours: float = 0.0
-        self._prev_day_energy_quota_kwh: float | None = None
+        self._outdoor_history_24h: list[tuple[datetime, float]] = []
+        self._demand_curve_tier: str = DEMAND_CURVE_TIER_WEATHER_API
+        self._slab_energy_pulses: list[tuple[datetime, float]] = []
+        self._last_energy_tick_ts: datetime | None = None
+        self._slab_energy_in_transit_kwh: float = 0.0
+        self._forecast_energy_need_24h_kwh: float = 0.0
+        self._planned_heating_hours: float = 0.0
+        self._scheduled_off_peak_start_time: datetime | None = None
 
         # Floor slab / hydronic loop sensor
         self._floor_temp_sensor = config.get(CONF_FLOOR_TEMP_SENSOR)
@@ -444,11 +460,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             DEFAULT_PEAK_MAX_RUN_DURATION,
             numeric_unit="minutes",
         )
-
-        # Daily thermal energy quota cap (Peak-hours anti-waste)
-        self._enforce_daily_quota = bool(config.get(CONF_ENFORCE_DAILY_QUOTA, DEFAULT_ENFORCE_DAILY_QUOTA))
-        self._enforce_daily_quota_sensor = config.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)
-        self._quota_blocked = False
 
         # Open window / ventilation detection
         self._window_detection_enabled = bool(config.get(CONF_WINDOW_DETECTION, DEFAULT_WINDOW_DETECTION))
@@ -498,9 +509,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._dead_time_measured_hours: float | None = None
         self._dead_time_samples_count: int = 0
         self._heating_start_derivative: float | None = None
-
-        # Slow drift ambient supervisor
-        self._ambient_trim_ratio: float = 1.0
 
         # Temperature presets
         self._eco_temp = float(config.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP))
@@ -554,8 +562,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._simulated_heater_state = False
         self._decision_reason = "Model initializing"
         self._decision_key = DECISION_OFF if self._hvac_mode == HVACMode.OFF else DECISION_IDLE
-        self._energy_needed_kwh = 0.0
-        self._hours_needed_24h = 0.0
 
         # Stale sensor watchdog & hardware safety guards
         self._cur_temp_ts: datetime | None = None
@@ -603,6 +609,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "counters_date": str(self._last_day_reset),
             "projection_history": [[t.isoformat(), v] for t, v in self._projection_history],
             "model_error_history": [[t.isoformat(), v] for t, v in self._model_error_history],
+            "temp_history": [[t.isoformat(), round(v, 2)] for t, v in self._temp_history[-60:]],
             "filtered_temp": self._filtered_temp,
             "temp_derivative": self._temp_derivative,
             "derivative_smooth": self._derivative_smooth,
@@ -616,6 +623,24 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "heat_loss_measured_wk": self._heat_loss_measured_wk,
             "dead_time_samples_count": self._dead_time_samples_count,
             "dead_time_measured_hours": self._dead_time_measured_hours,
+            # v0.4.0 zero-impact restart persistence
+            "slab_energy_pulses": [[t.isoformat(), round(kwh, 5)] for t, kwh in self._slab_energy_pulses],
+            "last_energy_tick_ts": (
+                self._last_energy_tick_ts.isoformat() if self._last_energy_tick_ts else None
+            ),
+            "outdoor_history_24h": [[t.isoformat(), round(v, 2)] for t, v in self._outdoor_history_24h],
+            "weather_forecast_curve": [
+                [t.isoformat(), round(v, 2)] for t, v in self._weather_forecast_curve
+            ],
+            "weather_forecast_cache_ts": (
+                self._weather_forecast_cache_ts.isoformat() if self._weather_forecast_cache_ts else None
+            ),
+            "window_open": self._window_open,
+            "was_window_open": self._was_window_open,
+            "window_open_time": self._window_open_time.isoformat() if self._window_open_time else None,
+            "window_recovery_until": (
+                self._window_recovery_until.isoformat() if self._window_recovery_until else None
+            ),
         }
 
     def _schedule_state_save(self) -> None:
@@ -670,6 +695,27 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             sum_sq = sum(err ** 2 for _, err in self._model_error_history)
             self._model_error_rms = round(math.sqrt(sum_sq / len(self._model_error_history)), 2)
 
+        temp_hist = self._parse_iso_history(data.get("temp_history"), now - timedelta(minutes=15))
+        if temp_hist:
+            self._temp_history = temp_hist
+
+        transit_horizon_h = max(4.0, 1.5 * max(0.5, self._effective_dead_time))
+        pulses = self._parse_iso_history(
+            data.get("slab_energy_pulses"), now - timedelta(hours=transit_horizon_h)
+        )
+        if pulses:
+            self._slab_energy_pulses = pulses
+
+        outdoor_hist = self._parse_iso_history(data.get("outdoor_history_24h"), now - timedelta(hours=24))
+        if outdoor_hist:
+            self._outdoor_history_24h = outdoor_hist
+
+        weather_curve = self._parse_iso_history(
+            data.get("weather_forecast_curve"), now - timedelta(hours=1)
+        )
+        if weather_curve:
+            self._weather_forecast_curve = weather_curve
+
         for attr_name, key, caster in (
             ("_filtered_temp", "filtered_temp", float),
             ("_temp_derivative", "temp_derivative", float),
@@ -678,6 +724,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ("_heat_loss_measured_wk", "heat_loss_measured_wk", float),
             ("_dead_time_samples_count", "dead_time_samples_count", int),
             ("_dead_time_measured_hours", "dead_time_measured_hours", float),
+            ("_window_open", "window_open", bool),
+            ("_was_window_open", "was_window_open", bool),
         ):
             val = data.get(key)
             if val is not None:
@@ -693,6 +741,10 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ("_cur_temp_ts", "cur_temp_ts"),
             ("_outdoor_temp_ts", "outdoor_temp_ts"),
             ("_last_heat_loss_sample_ts", "last_heat_loss_sample_ts"),
+            ("_last_energy_tick_ts", "last_energy_tick_ts"),
+            ("_weather_forecast_cache_ts", "weather_forecast_cache_ts"),
+            ("_window_open_time", "window_open_time"),
+            ("_window_recovery_until", "window_recovery_until"),
         ):
             raw_ts = data.get(key)
             if raw_ts is not None:
@@ -703,6 +755,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     setattr(self, attr_name, parsed_ts)
                 except (ValueError, TypeError):
                     pass
+
+        if self._window_recovery_until is not None and now >= self._window_recovery_until:
+            self._window_recovery_until = None
+        if self._slab_energy_pulses:
+            self._slab_energy_in_transit_kwh = self._compute_slab_energy_in_transit(now)
 
         today_str = str(dt_util.now().date())
         if data.get("counters_date") == today_str:
@@ -837,16 +894,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     self._comfort_temp = float(old_comfort)
                 except (ValueError, TypeError):
                     pass
-            if "unserved_quota_carryover_hours" in old_attrs and old_attrs["unserved_quota_carryover_hours"] is not None:
-                try:
-                    self._unserved_quota_carryover_hours = float(old_attrs["unserved_quota_carryover_hours"])
-                except (ValueError, TypeError):
-                    pass
-            if "energy_quota_24h_kwh" in old_attrs and old_attrs["energy_quota_24h_kwh"] is not None:
-                try:
-                    self._prev_day_energy_quota_kwh = float(old_attrs["energy_quota_24h_kwh"])
-                except (ValueError, TypeError):
-                    pass
 
         # Restore internal histories and observer state from self-contained HA Store
         await self._async_restore_persisted_store()
@@ -885,13 +932,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self.async_on_remove(
                 async_track_state_change_event(
                     self.hass, [self._observed_heater], self._async_observed_heater_changed
-                )
-            )
-
-        if self._enforce_daily_quota_sensor:
-            self.async_on_remove(
-                async_track_state_change_event(
-                    self.hass, [self._enforce_daily_quota_sensor], self._async_quota_sensor_changed
                 )
             )
 
@@ -1060,12 +1100,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
-        quota_enforcement_active = self._enforce_daily_quota
-        if self._enforce_daily_quota_sensor:
-            st_q = self.hass.states.get(self._enforce_daily_quota_sensor)
-            if st_q and st_q.state not in ["unknown", "unavailable"]:
-                quota_enforcement_active = st_q.state == "on"
-
         window_detection_active = self._window_detection_enabled
         if self._window_detection_sensor:
             st_w = self.hass.states.get(self._window_detection_sensor)
@@ -1091,6 +1125,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "auto_calibrate_dead_time": self._auto_calibrate_dead_time,
             ATTR_KALATA_PROCESS_NOISE: self._kalata_process_noise,
             "outdoor_precharge_max_temp": self._outdoor_precharge_max_temp,
+            ATTR_OFF_PEAK_COMFORT_MARGIN: self._off_peak_comfort_margin,
             "comfort_safety_deficit": self._comfort_safety_deficit,
             "temp_derivative_hourly": round(self._derivative_smooth, 3),
             "temp_projected_ahead": (
@@ -1107,14 +1142,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ATTR_WIND_FACTOR: self._wind_factor,
             ATTR_WIND_SPEED: self._wind_speed,
             "compressor_power_watts": self._power_watts,
-            "energy_quota_24h_kwh": round(self._energy_needed_kwh, 2),
-            ATTR_AMBIENT_TRIM_RATIO: self._ambient_trim_ratio,
+            ATTR_FORECAST_ENERGY_NEED_24H_KWH: round(self._forecast_energy_need_24h_kwh, 2),
+            ATTR_SLAB_ENERGY_IN_TRANSIT_KWH: round(self._slab_energy_in_transit_kwh, 2),
+            ATTR_PLANNED_HEATING_HOURS: round(self._planned_heating_hours, 2),
+            ATTR_DEMAND_CURVE_TIER: self._demand_curve_tier,
             ATTR_SOLAR_CREDIT_KWH: self._solar_credit_kwh,
-            "heating_hours_needed_24h": round(self._hours_needed_24h, 2),
             "heating_hours_done_today": round(run_hours, 2),
-            "heating_hours_remaining_24h": round(max(0.0, self._hours_needed_24h - run_hours), 2),
-            "daily_quota_enforced": quota_enforcement_active,
-            "daily_quota_blocked": self._quota_blocked,
             "window_detection_active": window_detection_active,
             "window_open_detected": self._window_open,
             CONF_POST_AIRING_RECOVERY_MINUTES: self._post_airing_recovery_minutes,
@@ -1134,14 +1167,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             "off_peak_active": off_peak_active,
             "heures_creuses_active": off_peak_active,
             CONF_WEATHER_ENTITY: self._weather_entity,
-            CONF_USE_WEATHER_FORECAST_AVERAGE: self._use_weather_forecast_average,
             ATTR_FORECAST_OUTDOOR_TEMP_24H: (
                 round(self._forecast_outdoor_temp_24h, 2)
                 if self._forecast_outdoor_temp_24h is not None
                 else None
             ),
             ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE: self._weather_outage_fallback_active,
-            ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS: round(self._unserved_quota_carryover_hours, 2),
             ATTR_SENSOR_STALE: self._sensor_stale,
             CONF_SENSOR_STALE_TIMEOUT_MINUTES: self._sensor_stale_timeout_minutes,
             CONF_MAX_CONTINUOUS_RUN_MINUTES: self._max_continuous_run_minutes,
@@ -1387,79 +1418,183 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._weather_forecast_cache_ts = None
         self.hass.async_create_task(self._async_control_heating())
 
-    async def _async_get_weather_forecast_24h_average(self) -> float | None:
-        """Fetch rolling 24-hour hourly forecast average from weather service (with 15-min TTL cache)."""
+    async def _async_get_weather_hourly_forecast(self, now_utc: datetime) -> list[tuple[datetime, float]]:
+        """Fetch 24-hour hourly forecast curve from weather service (with 15-min TTL cache & persistence)."""
         if not self._weather_entity:
-            return None
-        st_weather = self.hass.states.get(self._weather_entity)
-        if not st_weather or st_weather.state in ["unknown", "unavailable"]:
-            self._weather_forecast_cache_ts = None
-            _LOGGER.warning(
-                "Weather entity %s is %s; cannot compute 24h forecast average",
-                self._weather_entity,
-                st_weather.state if st_weather else "missing",
-            )
-            return None
+            return []
 
-        now_utc = dt_util.utcnow()
         if (
             self._weather_forecast_cache_ts is not None
-            and self._weather_forecast_cache_avg is not None
+            and self._weather_forecast_curve
             and (now_utc - self._weather_forecast_cache_ts).total_seconds() < WEATHER_FORECAST_CACHE_TTL_SECONDS
         ):
-            return self._weather_forecast_cache_avg
+            return self._weather_forecast_curve
 
+        st_weather = self.hass.states.get(self._weather_entity)
         forecast_list: list[dict[str, Any]] = []
-        if self.hass.services.has_service("weather", "get_forecasts"):
-            try:
-                response = await self.hass.services.async_call(
-                    "weather",
-                    "get_forecasts",
-                    {"entity_id": self._weather_entity, "type": "hourly"},
-                    blocking=True,
-                    return_response=True,
-                )
-                if response and self._weather_entity in response:
-                    forecast_list = response[self._weather_entity].get("forecast") or []
-            except Exception as err:
-                _LOGGER.debug("weather.get_forecasts call failed: %s", err)
+        if st_weather and st_weather.state not in ["unknown", "unavailable"]:
+            if self.hass.services.has_service("weather", "get_forecasts"):
+                try:
+                    response = await self.hass.services.async_call(
+                        "weather",
+                        "get_forecasts",
+                        {"entity_id": self._weather_entity, "type": "hourly"},
+                        blocking=True,
+                        return_response=True,
+                    )
+                    if response and self._weather_entity in response:
+                        forecast_list = response[self._weather_entity].get("forecast") or []
+                except Exception as err:
+                    _LOGGER.debug("weather.get_forecasts call failed: %s", err)
 
-        if not forecast_list and "forecast" in st_weather.attributes:
-            forecast_list = st_weather.attributes.get("forecast") or []
+            if not forecast_list and "forecast" in st_weather.attributes:
+                forecast_list = st_weather.attributes.get("forecast") or []
 
-        if not forecast_list:
-            return None
-
-        temps: list[float] = []
-        now_dt = dt_util.now()
-        horizon_dt = now_dt + timedelta(hours=24)
-
-        for entry in forecast_list:
+        parsed_curve: list[tuple[datetime, float]] = []
+        horizon_dt = now_utc + timedelta(hours=24)
+        for idx, entry in enumerate(forecast_list):
             if "temperature" not in entry or entry["temperature"] is None:
+                continue
+            try:
+                temp_val = float(entry["temperature"])
+            except (ValueError, TypeError):
                 continue
             entry_time = entry.get("datetime")
             if entry_time is not None:
                 parsed_time = dt_util.parse_datetime(str(entry_time))
                 if parsed_time is not None:
-                    if parsed_time < now_dt - timedelta(hours=1) or parsed_time > horizon_dt:
+                    ts_utc = parsed_time.astimezone(UTC) if parsed_time.tzinfo else parsed_time.replace(tzinfo=UTC)
+                    if ts_utc < now_utc - timedelta(hours=1) or ts_utc > horizon_dt:
                         continue
-            temps.append(float(entry["temperature"]))
-            if len(temps) >= 24:
+                    parsed_curve.append((ts_utc, temp_val))
+                    if len(parsed_curve) >= 24:
+                        break
+                    continue
+            parsed_curve.append((now_utc + timedelta(hours=idx), temp_val))
+            if len(parsed_curve) >= 24:
                 break
 
-        if not temps:
-            temps = [
-                float(e["temperature"])
-                for e in forecast_list[:24]
-                if "temperature" in e and e["temperature"] is not None
-            ]
+        if not parsed_curve and forecast_list:
+            for idx, entry in enumerate(forecast_list[:24]):
+                if "temperature" in entry and entry["temperature"] is not None:
+                    try:
+                        parsed_curve.append((now_utc + timedelta(hours=idx), float(entry["temperature"])))
+                    except (ValueError, TypeError):
+                        continue
 
-        if temps:
-            avg = round(sum(temps) / len(temps), 2)
-            self._weather_forecast_cache_avg = avg
+        if parsed_curve:
+            self._weather_forecast_curve = parsed_curve
             self._weather_forecast_cache_ts = now_utc
-            return avg
-        return None
+            return parsed_curve
+
+        # Weather API outage: reuse persisted forecast curve if >= 6 future hours remain
+        future_cached = [
+            (ts, val) for ts, val in self._weather_forecast_curve if ts >= now_utc - timedelta(hours=1)
+        ]
+        if len(future_cached) >= 6:
+            return future_cached
+        return []
+
+    def _record_outdoor_history(self, now_utc: datetime) -> None:
+        """Record at most one outdoor temperature sample per hour over a rolling 24h window."""
+        if self._outdoor_temp is None or self._outdoor_sensor_stale:
+            return
+        cutoff = now_utc - timedelta(hours=24)
+        self._outdoor_history_24h = [(t, v) for t, v in self._outdoor_history_24h if t >= cutoff]
+        if not self._outdoor_history_24h or (now_utc - self._outdoor_history_24h[-1][0]).total_seconds() >= 3600:
+            self._outdoor_history_24h.append((now_utc, float(self._outdoor_temp)))
+
+    def _record_slab_energy_pulse(self, now_utc: datetime) -> None:
+        """Record incremental thermal energy injected while compressor is active and prune expired pulses."""
+        transit_horizon_h = max(0.75, 1.5 * max(0.5, self._effective_dead_time))
+        cutoff = now_utc - timedelta(hours=transit_horizon_h)
+        self._slab_energy_pulses = [(t, e) for t, e in self._slab_energy_pulses if t >= cutoff]
+
+        if self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
+            ref_ts = self._last_energy_tick_ts or self._cycle_start_time or now_utc
+            dt_hours = max(0.0, (now_utc - ref_ts).total_seconds() / 3600.0)
+            if 0.0 < dt_hours <= 4.0:
+                kwh = (self._power_watts / 1000.0) * dt_hours
+                if kwh > 0.0:
+                    self._slab_energy_pulses.append((now_utc, kwh))
+            self._last_energy_tick_ts = now_utc
+        else:
+            self._last_energy_tick_ts = None
+
+        self._slab_energy_in_transit_kwh = self._compute_slab_energy_in_transit(now_utc)
+
+    def _compute_slab_energy_in_transit(self, now_utc: datetime) -> float:
+        """Compute thermal energy (kWh) still propagating through the slab over 1.5 * effective_dead_time."""
+        transit_horizon_h = max(0.75, 1.5 * max(0.5, self._effective_dead_time))
+        total_kwh = 0.0
+        for ts, pulse_kwh in self._slab_energy_pulses:
+            age_h = (now_utc - ts).total_seconds() / 3600.0
+            if age_h < 0.0:
+                total_kwh += pulse_kwh
+            elif age_h < transit_horizon_h:
+                remaining_frac = 1.0 - (age_h / transit_horizon_h)
+                total_kwh += pulse_kwh * remaining_frac
+        return round(max(0.0, total_kwh), 3)
+
+    def _effective_thermal_capacity_kwh_k(self) -> float:
+        """Return effective room+slab thermal capacity C_eff in kWh/K."""
+        return max(
+            MIN_EFFECTIVE_THERMAL_CAPACITY_KWH_K,
+            (self._effective_heat_loss * self._slab_tau) / 1000.0,
+        )
+
+    async def _async_build_hourly_demand_curve(self, now_utc: datetime) -> tuple[list[float], str]:
+        """Build 24h hourly thermal demand curve (kW per hour) using strict 3-tier fallback cascade."""
+        # Tier 1: Hourly weather API forecast
+        forecast_curve = await self._async_get_weather_hourly_forecast(now_utc)
+        if forecast_curve:
+            temps = [val for _, val in forecast_curve]
+            while len(temps) < 24:
+                temps.append(temps[-1])
+            temps = temps[:24]
+            self._forecast_outdoor_temp_24h = round(sum(temps) / len(temps), 2)
+            self._weather_outage_fallback_active = False
+            curve_kw = [
+                (self._effective_heat_loss * self._wind_factor * max(0.0, self._target_temp - t_ext)) / 1000.0
+                for t_ext in temps
+            ]
+            return curve_kw, DEMAND_CURVE_TIER_WEATHER_API
+
+        # Tier 2: Local 24h persistence / rolling average from outdoor_sensor
+        self._weather_outage_fallback_active = True
+        if self._outdoor_temp is not None and not self._outdoor_sensor_stale:
+            if len(self._outdoor_history_24h) >= 3:
+                hist_temps = [v for _, v in self._outdoor_history_24h]
+                shift = self._outdoor_temp - hist_temps[-1]
+                temps = [hist_temps[i % len(hist_temps)] + (shift * 0.5) for i in range(24)]
+            else:
+                temps = [float(self._outdoor_temp)] * 24
+            self._forecast_outdoor_temp_24h = round(sum(temps) / len(temps), 2)
+            curve_kw = [
+                (self._effective_heat_loss * self._wind_factor * max(0.0, self._target_temp - t_ext)) / 1000.0
+                for t_ext in temps
+            ]
+            return curve_kw, DEMAND_CURVE_TIER_OUTDOOR_PERSISTENCE
+
+        # Tier 3: Degraded fallback using observed Kalata passive cooling derivative dT/dt
+        self._forecast_outdoor_temp_24h = None
+        c_eff = self._effective_thermal_capacity_kwh_k()
+        cooling_rate = max(0.0, -self._derivative_smooth) if self._derivative_smooth is not None else 0.0
+        p_kw = c_eff * cooling_rate
+        return [p_kw] * 24, DEMAND_CURVE_TIER_KALATA_DERIVATIVE
+
+    @staticmethod
+    def _integrate_demand_curve_kwh(curve_kw: list[float], hours: float) -> float:
+        """Integrate hourly power demand curve (kW) over a fractional horizon in hours."""
+        if not curve_kw or hours <= 0.0:
+            return 0.0
+        capped_h = min(float(len(curve_kw)), hours)
+        whole = int(capped_h)
+        frac = capped_h - whole
+        total = sum(curve_kw[:whole])
+        if frac > 0.0 and whole < len(curve_kw):
+            total += curve_kw[whole] * frac
+        return total
 
     @property
     def _total_heating_hours_today(self) -> float:
@@ -1724,23 +1859,13 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         """Main algorithmic loop: thermodynamic energy balance and model-based scheduling."""
         now_utc = dt_util.utcnow()
 
-        # Midnight daily counter reset (evaluated unconditionally regardless of mode)
+        # Midnight daily mechanical cycle counter reset (evaluated unconditionally regardless of mode)
         today = dt_util.now().date()
         if today != self._last_day_reset:
-            unserved_hours = max(0.0, self._hours_needed_24h - self._total_heating_hours_today)
-            self._unserved_quota_carryover_hours = round(
-                min(MAX_UNSERVED_QUOTA_CARRYOVER_HOURS, unserved_hours), 2
-            )
-            self._prev_day_energy_quota_kwh = self._energy_needed_kwh
             self._hours_run_today = 0.0
             self._cycles_today = 0
             self._last_day_reset = today
-            _LOGGER.info(
-                "Midnight daily counters reset for %s (carryover: %.2fh, saved prev quota: %.2f kWh)",
-                self.name,
-                self._unserved_quota_carryover_hours,
-                self._prev_day_energy_quota_kwh or 0.0,
-            )
+            _LOGGER.info("Midnight daily cycle counters reset for %s", self.name)
 
         if self._hvac_mode == HVACMode.OFF:
             self._decision_key = DECISION_OFF
@@ -1849,93 +1974,75 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             st = self.hass.states.get(self._off_peak_sensor)
             off_peak_active = st is not None and st.state == "on"
 
-        # 7. Calculate 24h thermal energy quota (kWh) with Wind, Rolling Weather Forecast & Slow Drift Ambient Supervisor
-        effective_outdoor: float | None = self._outdoor_temp
-        self._forecast_outdoor_temp_24h = None
-        self._weather_outage_fallback_active = False
-        weather_fallback_quota_kwh: float | None = None
+        # 7. Record outdoor persistence history & slab energy-in-transit pulses
+        self._record_outdoor_history(now_utc)
+        self._record_slab_energy_pulse(now_utc)
 
-        if self._use_weather_forecast_average and self._weather_entity:
-            forecast_avg = await self._async_get_weather_forecast_24h_average()
-            if forecast_avg is not None:
-                effective_outdoor = forecast_avg
-                self._forecast_outdoor_temp_24h = forecast_avg
-            else:
-                self._weather_outage_fallback_active = True
-                if self._prev_day_energy_quota_kwh is not None and self._prev_day_energy_quota_kwh > 0.0:
-                    weather_fallback_quota_kwh = round(self._prev_day_energy_quota_kwh * 1.05, 2)
-                    _LOGGER.warning(
-                        "Weather forecast unavailable for %s; falling back to previous day's quota +5%% (%.2f kWh)",
-                        self.name,
-                        weather_fallback_quota_kwh,
-                    )
+        # 8. Build 24h hourly thermal demand curve (3-tier fallback cascade)
+        hourly_curve_kw, self._demand_curve_tier = await self._async_build_hourly_demand_curve(now_utc)
+        raw_24h_kwh = self._integrate_demand_curve_kwh(hourly_curve_kw, 24.0)
 
-        if weather_fallback_quota_kwh is not None:
-            base_energy_kwh = weather_fallback_quota_kwh
-            trimmed_energy_kwh = base_energy_kwh
-            self._energy_needed_kwh = base_energy_kwh
-            self._hours_needed_24h = round(
-                (self._energy_needed_kwh * 1000.0) / self._power_watts + self._unserved_quota_carryover_hours,
-                2,
+        # Solar gain integration with Morning Wake-Up Comfort Guard (Peak hours only)
+        self._solar_credit_kwh = 0.0
+        if self._solar_sensor:
+            local_now = dt_util.now()
+            comfort_guard_active = (
+                local_now.hour < SOLAR_MORNING_CUTOFF_HOUR
+                or off_peak_active
+                or (self._cur_temp is not None and self._cur_temp < (self._target_temp - 0.3))
             )
-        elif effective_outdoor is not None:
-            delta_t = max(0.0, self._target_temp - effective_outdoor)
-            base_energy_kwh = (
-                self._effective_heat_loss * self._wind_factor * delta_t * 24.0
-            ) / 1000.0
+            if not comfort_guard_active:
+                st_solar = self.hass.states.get(self._solar_sensor)
+                if st_solar and st_solar.state not in ["unknown", "unavailable"]:
+                    try:
+                        solar_val = float(st_solar.state)
+                        if solar_val > 50.0:
+                            solar_factor = min(1.0, max(0.0, (solar_val - 50.0) / 750.0))
+                            max_solar_credit = raw_24h_kwh * SOLAR_MAX_CREDIT_RATIO
+                            self._solar_credit_kwh = round(max_solar_credit * solar_factor, 2)
+                    except (ValueError, TypeError):
+                        pass
 
-            # Ambient supervisor: gentle proportional trim eliminating persistent offset without integral windup
-            if self._cur_temp is not None:
-                ambient_error = self._target_temp - self._cur_temp
-                self._ambient_trim_ratio = round(
-                    max(AMBIENT_TRIM_MIN, min(AMBIENT_TRIM_MAX, 1.0 + AMBIENT_TRIM_GAIN * ambient_error)),
-                    3,
-                )
-            else:
-                self._ambient_trim_ratio = 1.0
+        self._forecast_energy_need_24h_kwh = max(0.0, round(raw_24h_kwh - self._solar_credit_kwh, 2))
+        power_kw = max(0.1, self._power_watts / 1000.0)
+        c_eff = self._effective_thermal_capacity_kwh_k()
+        e_transit = self._slab_energy_in_transit_kwh
+        room_excess_kwh = (
+            c_eff * (self._cur_temp - self._target_temp) if self._cur_temp is not None else 0.0
+        )
 
-            trimmed_energy_kwh = base_energy_kwh * self._ambient_trim_ratio
+        # Resolve Off-Peak window boundaries for unified horizon scheduling
+        t_hc_end = self._resolve_off_peak_end(now_utc) if off_peak_active else None
+        t_next_hc = self._find_scheduled_off_peak_start(now_utc) if not off_peak_active else None
+        hours_until_next_hc = (
+            max(0.0, (t_next_hc - now_utc).total_seconds() / 3600.0)
+            if t_next_hc is not None
+            else 24.0
+        )
 
-            # 6. Solar gain integration with inviolable Morning Wake-Up Comfort Guard
-            self._solar_credit_kwh = 0.0
-            if self._solar_sensor:
-                local_now = dt_util.now()
-                # Comfort Guard 1: Before 09:00 AM local time or during off-peak night recharge,
-                # solar credit is strictly 0.0 to prevent under-heating at morning wake-up.
-                # Comfort Guard 2: If current temperature is already below comfort setpoint (>0.3°C drop),
-                # solar credit is completely inhibited.
-                comfort_guard_active = (
-                    local_now.hour < SOLAR_MORNING_CUTOFF_HOUR
-                    or off_peak_active
-                    or (self._cur_temp is not None and self._cur_temp < (self._target_temp - 0.3))
-                )
+        if off_peak_active:
+            horizon_hours = 24.0
+        else:
+            horizon_hours = min(24.0, max(1.0, hours_until_next_hc))
 
-                if not comfort_guard_active:
-                    st_solar = self.hass.states.get(self._solar_sensor)
-                    if st_solar and st_solar.state not in ["unknown", "unavailable"]:
-                        try:
-                            solar_val = float(st_solar.state)
-                            if solar_val > 50.0:  # Active solar irradiance threshold (W/m² or equivalent)
-                                # Scale between 50 W/m² (diffuse) and 800 W/m² (bright direct sun)
-                                solar_factor = min(1.0, max(0.0, (solar_val - 50.0) / 750.0))
-                                max_solar_credit = trimmed_energy_kwh * SOLAR_MAX_CREDIT_RATIO
-                                self._solar_credit_kwh = round(max_solar_credit * solar_factor, 2)
-                        except (ValueError, TypeError):
-                            pass
+        horizon_energy_kwh = max(
+            0.0,
+            self._integrate_demand_curve_kwh(hourly_curve_kw, horizon_hours) - self._solar_credit_kwh,
+        )
+        net_energy_needed_kwh = max(0.0, horizon_energy_kwh - room_excess_kwh - e_transit)
+        self._planned_heating_hours = round(net_energy_needed_kwh / power_kw, 2)
+        self._scheduled_off_peak_start_time = None
 
-            self._energy_needed_kwh = max(0.0, round(trimmed_energy_kwh - self._solar_credit_kwh, 2))
-            # Required compressor operating hours over 24h + unserved carry-over
-            self._hours_needed_24h = round(
-                (self._energy_needed_kwh * 1000.0) / self._power_watts + self._unserved_quota_carryover_hours,
-                2,
-            )
-
-        # 5. Model-based predictive scheduling strategy
+        # 9. Unified HC/HP Predictive Energy-Balance Decision Engine
         should_heat = False
         outdoor_ref = (
-            self._outdoor_temp
-            if (self._outdoor_temp is not None and not self._outdoor_sensor_stale)
-            else effective_outdoor
+            self._forecast_outdoor_temp_24h
+            if self._forecast_outdoor_temp_24h is not None
+            else (
+                self._outdoor_temp
+                if (self._outdoor_temp is not None and not self._outdoor_sensor_stale)
+                else None
+            )
         )
 
         if self._cur_temp is not None:
@@ -1946,46 +2053,107 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             proj_val = self._temp_projected if self._temp_projected is not None else self._cur_temp
             projected_error = self._target_temp - proj_val
 
-            # Rule 0: Emergency comfort deficit bypass (unconditional heating if room falls >= 1.5°C below target,
-            # independent of outdoor sensor availability - F-04; suspended during post-airing passive rebound)
+            effective_rms = self._model_error_rms if self._model_error_rms is not None else 0.10
+            rule_b_threshold = min(
+                MAX_RULE_B_THRESHOLD,
+                max(
+                    self._rule_b_min_threshold,
+                    round(2.0 * effective_rms, 2),
+                ),
+            )
+            self._current_rule_b_threshold = rule_b_threshold
+
+            # Rule 0: Emergency comfort deficit bypass (unconditional if room falls >= 1.5°C below target;
+            # suspended during post-airing passive rebound)
             if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE and not in_recovery:
                 should_heat = True
                 self._decision_key = DECISION_EMERGENCY_DEFICIT
                 self._decision_reason = (
                     f"Emergency comfort deficit bypass: curr {self._cur_temp}°C <= target {self._target_temp}°C - "
-                    f"{EMERGENCY_COMFORT_DEFICIT_OVERRIDE}°C (quota bypassed)"
+                    f"{EMERGENCY_COMFORT_DEFICIT_OVERRIDE}°C"
                 )
-            # Rule A: Priority thermal precharge during Off-Peak hours
-            elif off_peak_active and outdoor_ref is not None:
-                if error >= -0.5 and outdoor_ref <= self._outdoor_precharge_max_temp:
-                    should_heat = True
-                    self._decision_key = DECISION_OFF_PEAK_PRECHARGE
-                    self._decision_reason = (
-                        f"Off-peak thermal precharge (ext: {outdoor_ref}°C, "
-                        f"curr: {self._cur_temp}°C, proj: {round(proj_val, 2)}°C in {self._dead_time}h)"
-                    )
-            # Rule B: Peak hours heating only on anticipated trajectory drop
-            elif not off_peak_active and outdoor_ref is not None:
-                effective_rms = self._model_error_rms if self._model_error_rms is not None else 0.10
-                rule_b_threshold = min(
-                    MAX_RULE_B_THRESHOLD,
-                    max(
-                        self._rule_b_min_threshold,
-                        round(2.0 * effective_rms, 2),
-                    ),
-                )
-                self._current_rule_b_threshold = rule_b_threshold
-
-                if projected_error > rule_b_threshold or (
-                    not in_recovery and error > self._rule_b_min_threshold
+            elif off_peak_active:
+                hc_ceiling = self._target_temp + self._off_peak_comfort_margin
+                if self._cur_temp >= hc_ceiling or (
+                    proj_val >= (hc_ceiling + 0.2) and self._cur_temp >= self._target_temp
                 ):
-                    should_heat = True
-                    self._decision_key = DECISION_ANTICIPATED_DROP
+                    should_heat = False
+                    self._decision_key = DECISION_OVERSHOOT_CUTOFF
                     self._decision_reason = (
-                        f"Anticipated thermal drop: projected {round(proj_val, 2)}°C in {self._dead_time}h "
-                        f"(slope: {round(self._derivative_smooth, 3)}°C/h, threshold: {rule_b_threshold}°C, "
-                        f"below target {self._target_temp}°C)"
+                        f"Off-peak comfort ceiling reached: curr {self._cur_temp}°C, "
+                        f"projected {round(proj_val, 2)}°C (ceiling: {round(hc_ceiling, 2)}°C)"
                     )
+                elif (
+                    outdoor_ref is not None
+                    and outdoor_ref > self._outdoor_precharge_max_temp
+                    and error <= 0.0
+                ):
+                    should_heat = False
+                    self._decision_key = DECISION_IDLE
+                    self._decision_reason = (
+                        f"Idle (mild outdoor forecast {outdoor_ref}°C > {self._outdoor_precharge_max_temp}°C)"
+                    )
+                elif net_energy_needed_kwh <= 0.0 and error <= self._rule_b_min_threshold:
+                    should_heat = False
+                    self._decision_key = DECISION_ENERGY_BALANCE_SATISFIED
+                    self._decision_reason = (
+                        f"Off-peak energy balance met (24h need {self._forecast_energy_need_24h_kwh} kWh, "
+                        f"in-transit {round(e_transit, 2)} kWh, curr {self._cur_temp}°C)"
+                    )
+                else:
+                    # End-of-off-peak optimal scheduling
+                    min_run_h = self._min_cycle_duration.total_seconds() / 3600.0
+                    needed_run_h = max(min_run_h, self._planned_heating_hours)
+                    if self._max_continuous_run_minutes > 0:
+                        max_seg_h = self._max_continuous_run_minutes / 60.0
+                        if needed_run_h > max_seg_h:
+                            pauses = math.ceil(needed_run_h / max_seg_h) - 1
+                            needed_run_h += pauses * (self._min_off_duration.total_seconds() / 3600.0)
+                    target_start = (
+                        t_hc_end - timedelta(hours=needed_run_h)
+                        if t_hc_end is not None
+                        else now_utc
+                    )
+                    self._scheduled_off_peak_start_time = max(now_utc, target_start)
+                    is_running = self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
+                    if now_utc >= target_start or is_running or error > self._rule_b_min_threshold:
+                        should_heat = True
+                        self._decision_key = DECISION_OFF_PEAK_PRECHARGE
+                        self._decision_reason = (
+                            f"Off-peak predictive charge ({self._planned_heating_hours}h planned, "
+                            f"in-transit {round(e_transit, 2)} kWh, curr {self._cur_temp}°C, "
+                            f"ceiling {round(hc_ceiling, 2)}°C)"
+                        )
+                    else:
+                        should_heat = False
+                        self._decision_key = DECISION_OFF_PEAK_DEFERRED
+                        self._decision_reason = (
+                            f"Off-peak charge deferred to end of window ({self._planned_heating_hours}h needed, "
+                            f"target start {target_start.astimezone().strftime('%H:%M')})"
+                        )
+            else:
+                # Peak hours: strict top-up only if trajectory drops AND deficit predicted before next HC
+                trajectory_drop = projected_error > rule_b_threshold or (
+                    not in_recovery and error > self._rule_b_min_threshold
+                )
+                if trajectory_drop:
+                    comfort_override = error >= self._comfort_safety_deficit
+                    near_hc = hours_until_next_hc <= max(0.5, self._effective_dead_time * 0.5)
+                    if comfort_override or (net_energy_needed_kwh > 0.0 and not near_hc):
+                        should_heat = True
+                        self._decision_key = DECISION_ANTICIPATED_DROP
+                        self._decision_reason = (
+                            f"Peak-hour strict top-up: projected {round(proj_val, 2)}°C in {self._dead_time}h "
+                            f"(slope: {round(self._derivative_smooth, 3)}°C/h, threshold: {rule_b_threshold}°C, "
+                            f"deficit before HC: {round(net_energy_needed_kwh, 2)} kWh)"
+                        )
+                    else:
+                        should_heat = False
+                        self._decision_key = DECISION_ENERGY_BALANCE_SATISFIED
+                        self._decision_reason = (
+                            f"Peak-hour cycle skipped: energy balance met before next HC "
+                            f"(in-transit {round(e_transit, 2)} kWh, {round(hours_until_next_hc, 1)}h to HC)"
+                        )
 
             # Rule C: Surface and ambient overshoot protection (+0.6°C real or projected > target + 0.8°C)
             if error < -0.6 or (projected_error < -0.8 and self._cur_temp >= self._target_temp):
@@ -1995,7 +2163,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"Overshoot prevention cutoff: curr {self._cur_temp}°C, "
                     f"projected {round(proj_val, 2)}°C (target: {self._target_temp}°C)"
                 )
-            elif not should_heat:
+            elif not should_heat and self._decision_key not in (
+                DECISION_OFF_PEAK_DEFERRED,
+                DECISION_ENERGY_BALANCE_SATISFIED,
+                DECISION_OVERSHOOT_CUTOFF,
+            ):
                 self._decision_key = DECISION_IDLE
                 self._decision_reason = (
                     f"Idle (stable trajectory: curr {self._cur_temp}°C, "
@@ -2010,27 +2182,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"Hard overshoot ceiling cutoff: curr {self._cur_temp}°C >= "
                     f"target {self._target_temp}°C + {self._hard_overshoot_margin}°C"
                 )
-
-            # Rule D: Daily thermal quota enforcement during Peak hours
-            quota_enforcement_active = self._enforce_daily_quota
-            if self._enforce_daily_quota_sensor:
-                st_q = self.hass.states.get(self._enforce_daily_quota_sensor)
-                if st_q and st_q.state not in ["unknown", "unavailable"]:
-                    quota_enforcement_active = st_q.state == "on"
-
-            run_hours = self._total_heating_hours_today
-            quota_exceeded = (self._hours_needed_24h > 0.0) and (run_hours >= self._hours_needed_24h)
-            self._quota_blocked = False
-
-            if should_heat and not off_peak_active and quota_enforcement_active and quota_exceeded:
-                if error < self._comfort_safety_deficit:
-                    should_heat = False
-                    self._quota_blocked = True
-                    self._decision_key = DECISION_QUOTA_REACHED
-                    self._decision_reason = (
-                        f"Daily quota fulfilled ({round(run_hours, 2)}h / {round(self._hours_needed_24h, 2)}h done). "
-                        f"Peak-hour cycle inhibited by quota enforcement (switch ON)."
-                    )
 
         # Stale Sensor Watchdog Fail-Safe cutoff (unconditional even if outdoor sensor is unavailable - F-04)
         if self._sensor_stale:
@@ -2257,6 +2408,70 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         return None
 
+    def _resolve_off_peak_end(self, now: datetime) -> datetime | None:
+        """Resolve end timestamp (UTC) of the active off-peak window."""
+        if not self.hass:
+            return now + timedelta(hours=self._off_peak_duration_hours)
+
+        # 1. Check attributes on off_peak_sensor
+        if self._off_peak_sensor:
+            st = self.hass.states.get(self._off_peak_sensor)
+            if st and hasattr(st, "attributes") and isinstance(st.attributes, dict):
+                for attr_key in ["next_end", "end_time", "end"]:
+                    val = st.attributes.get(attr_key)
+                    if isinstance(val, datetime):
+                        end_utc = val.astimezone(UTC) if val.tzinfo else val.replace(tzinfo=UTC)
+                        if end_utc > now:
+                            return end_utc
+                    if isinstance(val, str):
+                        try:
+                            parsed = datetime.fromisoformat(val)
+                            end_utc = parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                            if end_utc > now:
+                                return end_utc
+                        except (ValueError, TypeError):
+                            pass
+
+        # 2. Check optional configured off_peak_end_entity (e.g. input_datetime or sensor HH:MM[:SS])
+        if self._off_peak_end_entity:
+            st_end = self.hass.states.get(self._off_peak_end_entity)
+            if st_end and getattr(st_end, "state", None) not in [None, "unknown", "unavailable", "none"]:
+                parts = str(st_end.state).strip().split(":")
+                if len(parts) >= 2:
+                    try:
+                        h = int(parts[0])
+                        m = int(parts[1])
+                        s = int(parts[2]) if len(parts) > 2 else 0
+                        now_local = now.astimezone() if now.tzinfo else now
+                        end_local = now_local.replace(hour=h, minute=m, second=s, microsecond=0)
+                        if end_local <= now_local:
+                            end_local += timedelta(days=1)
+                        return end_local.astimezone(UTC)
+                    except (ValueError, TypeError):
+                        pass
+
+        # 3. Derive from off_peak_start_entity + off_peak_duration_hours if available
+        if self._off_peak_start_entity:
+            st_start = self.hass.states.get(self._off_peak_start_entity)
+            if st_start and getattr(st_start, "state", None) not in [None, "unknown", "unavailable", "none"]:
+                parts = str(st_start.state).strip().split(":")
+                if len(parts) >= 2:
+                    try:
+                        h = int(parts[0])
+                        m = int(parts[1])
+                        s = int(parts[2]) if len(parts) > 2 else 0
+                        now_local = now.astimezone() if now.tzinfo else now
+                        start_local = now_local.replace(hour=h, minute=m, second=s, microsecond=0)
+                        if start_local > now_local:
+                            start_local -= timedelta(days=1)
+                        end_local = start_local + timedelta(hours=self._off_peak_duration_hours)
+                        if end_local > now_local:
+                            return end_local.astimezone(UTC)
+                    except (ValueError, TypeError):
+                        pass
+
+        return now + timedelta(hours=self._off_peak_duration_hours)
+
     def _update_next_transition_estimate(self, now: datetime) -> None:
         """Estimate the timestamp, type and rationale of the next FSM transition."""
         # 1. When heating is ACTIVE (running_min_lock or running_normal) -> next transition is turn_off
@@ -2285,23 +2500,21 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                         f"Danfoss minimum runtime lock ({int(self._min_cycle_duration.total_seconds() // 60)} min)"
                     )
             else:
-                # Off-peak hours: remaining thermal quota or continuous run cap
-                elapsed_cycle_hours = max(0.0, (now - cycle_start).total_seconds() / 3600.0)
-                total_hours_so_far = self._hours_run_today + elapsed_cycle_hours
-                remaining_hours = max(0.0, self._hours_needed_24h - total_hours_so_far)
-                t_quota = now + timedelta(hours=remaining_hours)
+                # Off-peak hours: remaining planned heating hours or continuous run cap
+                remaining_hours = max(0.0, self._planned_heating_hours)
+                t_plan = now + timedelta(hours=remaining_hours)
                 t_max_run = (
                     cycle_start + timedelta(minutes=self._max_continuous_run_minutes)
                     if self._max_continuous_run_minutes > 0
                     else None
                 )
 
-                if t_max_run and t_max_run < t_quota:
+                if t_max_run and t_max_run < t_plan:
                     t_target = t_max_run
                     reason = f"Max continuous run cap ({self._max_continuous_run_minutes} min thermal diffusion pause)"
                 else:
-                    t_target = t_quota
-                    reason = "Daily thermal quota completion"
+                    t_target = t_plan
+                    reason = "Predictive energy balance completion"
 
                 if t_target < t_min:
                     self._next_transition_time = t_min
@@ -2334,11 +2547,12 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             self._next_transition_reason = "Suspended: window open"
             return
 
-        # Attempt to resolve scheduled Off-Peak start time
-        t_off_peak: datetime | None = None
-        off_peak_start_time = self._find_scheduled_off_peak_start(now)
-        if off_peak_start_time is not None:
-            t_off_peak = off_peak_start_time
+        # Attempt to resolve scheduled Off-Peak start time (or deferred end-of-HC target)
+        t_off_peak: datetime | None = self._scheduled_off_peak_start_time
+        if t_off_peak is None:
+            off_peak_start_time = self._find_scheduled_off_peak_start(now)
+            if off_peak_start_time is not None:
+                t_off_peak = off_peak_start_time
 
         # Evaluate cooling trajectory in Peak hours (Rule B anticipated drop)
         t_drop: datetime | None = None
@@ -2455,6 +2669,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
+        self._last_energy_tick_ts = now
         self._heating_start_derivative = self._derivative_smooth
         self._hvac_action = HVACAction.HEATING
         self._cycles_today += 1
@@ -2546,9 +2761,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     _LOGGER.error("Failed to turn off heater entity %s: %s", self._heater_entity, err)
 
         if self._cycle_start_time:
+            self._record_slab_energy_pulse(now)
             run_sec = (now - self._cycle_start_time).total_seconds()
             self._hours_run_today += run_sec / 3600.0
             self._cycle_start_time = None
+            self._last_energy_tick_ts = None
 
         self._fsm_state = FSM_WAITING_MIN_OFF
         self._last_state_change = now

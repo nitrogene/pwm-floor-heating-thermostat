@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-11-25
+
+### Breaking Changes
+- **Mandatory Weather API & External Sensor**: `weather_entity` (hourly forecast API) and `outdoor_sensor` are now required in `ConfigFlow` / `OptionsFlow`, powering a 3-tier demand-curve fallback cascade.
+- **Removal of Legacy Midnight Daily Quota & Quota Entities**: Removed `enforce_daily_quota`, `enforce_daily_quota_sensor`, `use_weather_forecast_average`, `energy_quota_24h_kwh`, `heating_hours_remaining_24h`, `daily_quota_blocked`, `unserved_quota_carryover_hours`, and `decision: quota_reached`. Replaced by dedicated predictive energy-balance companion sensors (`forecast_energy_need_24h_kwh`, `slab_energy_in_transit_kwh`, `planned_heating_hours`).
+
+### Added
+- **3-Tier Forecast Demand Curve (`M-01`)**: Computes hourly thermal power demand $P_{\text{need}}(t)$ over a rolling 24h horizon with automatic fallback: **Tier 1** (`weather_api`) $\to$ **Tier 2** (`outdoor_persistence` 24h local history) $\to$ **Tier 3** (`kalata_derivative` passive cooling slope).
+- **Slab In-Transit Energy Tracker (`M-02`)**: Continuously tracks injected compressor energy propagating through the slab over $1.5 \cdot \theta_{\text{eff}}$ (`slab_energy_in_transit_kwh`), combined with closed-loop room recalibration $C_{\text{eff}} \cdot (T_{\text{cur}} - T_{\text{target}})$ to prevent back-to-back blind heating cycles.
+- **Unified HC/HP Engine with End-of-Off-Peak Scheduling (`M-03`)**:
+  - Schedules off-peak heating pulses toward the end of the off-peak window (`off_peak_end_entity` or configurable `off_peak_duration_hours`, default `8.0 h`), exposing `off_peak_deferred` and `energy_balance_satisfied` decision states.
+  - Configurable `off_peak_comfort_margin` (default `+0.3°C`, range `0.0–0.5°C`) prevents overnight charging from pushing rooms into the `+1.0°C` hard overshoot ceiling.
+  - Peak-hour heating restricted to strict top-up cycles (`peak_max_run_duration`) only when a deficit is predicted before the next off-peak window.
+- **Zero-Impact Home Assistant Restart Persistence (`M-04`)**: Persists timestamped `slab_energy_pulses`, rolling 24h `outdoor_history_24h`, cached `weather_forecast_curve`, and open-window / post-airing recovery timestamps (`_window_open`, `_window_recovery_until`, `_temp_history`) in `Store` so restarts have zero impact on thermal calculations.
+- **New Diagnostic Companion Sensors (`M-05`)**: Added `forecast_energy_need_24h_kwh`, `slab_energy_in_transit_kwh`, and `planned_heating_hours` with full EN/FR translations, updated `README.md`, and 101 passing Pytest unit/E2E tests.
+
+---
+
 ## [0.3.11] - 2026-11-23
 
 ### Added

@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-INTEGRATION_VERSION = "0.3.11"
+INTEGRATION_VERSION = "0.4.0"
 
 
 def get_integration_version() -> str:
@@ -17,6 +17,11 @@ CONF_TARGET_SENSOR = "target_sensor"
 CONF_OUTDOOR_SENSOR = "outdoor_sensor"
 CONF_OFF_PEAK_SENSOR = "off_peak_sensor"
 CONF_OFF_PEAK_START_ENTITY = "off_peak_start_entity"
+CONF_OFF_PEAK_END_ENTITY = "off_peak_end_entity"
+CONF_OFF_PEAK_DURATION_HOURS = "off_peak_duration_hours"
+DEFAULT_OFF_PEAK_DURATION_HOURS = 8.0
+CONF_OFF_PEAK_COMFORT_MARGIN = "off_peak_comfort_margin"
+DEFAULT_OFF_PEAK_COMFORT_MARGIN = 0.3
 CONF_HEURES_CREUSES_SENSOR = "heures_creuses_sensor"  # Alias for backward compatibility
 
 # Floor slab / hydronic loop sensor
@@ -55,8 +60,6 @@ MAX_RULE_B_THRESHOLD = 0.60  # Maximum ceiling (°C) for Rule B anticipation thr
 CONF_SOLAR_SENSOR = "solar_sensor"
 CONF_WIND_SENSOR = "wind_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
-CONF_USE_WEATHER_FORECAST_AVERAGE = "use_weather_forecast_average"
-DEFAULT_USE_WEATHER_FORECAST_AVERAGE = False
 WEATHER_FORECAST_CACHE_TTL_SECONDS = 900  # 15 minutes cache for weather.get_forecasts
 
 # Compressor mechanical safeties (Danfoss)
@@ -65,10 +68,18 @@ CONF_MIN_OFF_CYCLE_DURATION = "min_off_cycle_duration"
 CONF_MAX_CYCLES_PER_DAY = "max_cycles_per_day"
 CONF_PEAK_MAX_RUN_DURATION = "peak_max_run_duration"  # Adaptive PWM modulation: max continuous run in peak hours
 
-# Daily energy budget cap (Anti-waste during peak hours)
-CONF_ENFORCE_DAILY_QUOTA = "enforce_daily_quota"
-CONF_ENFORCE_DAILY_QUOTA_SENSOR = "enforce_daily_quota_sensor"
-DEFAULT_ENFORCE_DAILY_QUOTA = True
+# Predictive energy-balance demand curve tiers
+DEMAND_CURVE_TIER_WEATHER_API = "weather_api"
+DEMAND_CURVE_TIER_OUTDOOR_PERSISTENCE = "outdoor_persistence"
+DEMAND_CURVE_TIER_KALATA_DERIVATIVE = "kalata_derivative"
+
+# Predictive energy-balance telemetry attributes
+ATTR_FORECAST_ENERGY_NEED_24H_KWH = "forecast_energy_need_24h_kwh"
+ATTR_SLAB_ENERGY_IN_TRANSIT_KWH = "slab_energy_in_transit_kwh"
+ATTR_PLANNED_HEATING_HOURS = "planned_heating_hours"
+ATTR_DEMAND_CURVE_TIER = "demand_curve_tier"
+ATTR_OFF_PEAK_COMFORT_MARGIN = "off_peak_comfort_margin"
+MIN_EFFECTIVE_THERMAL_CAPACITY_KWH_K = 0.5  # Minimum effective room+slab thermal capacity (kWh/K)
 
 # Open window / ventilation detection
 CONF_WINDOW_DETECTION = "window_detection"
@@ -163,8 +174,6 @@ ATTR_MODEL_ERROR_RMS = "model_error_rms"
 ATTR_RULE_B_THRESHOLD = "rule_b_threshold"
 ATTR_FORECAST_OUTDOOR_TEMP_24H = "forecast_outdoor_temp_24h"
 ATTR_WEATHER_OUTAGE_FALLBACK_ACTIVE = "weather_outage_fallback_active"
-ATTR_UNSERVED_QUOTA_CARRYOVER_HOURS = "unserved_quota_carryover_hours"
-MAX_UNSERVED_QUOTA_CARRYOVER_HOURS = 2.0
 
 # Sensor stale watchdog & hardware safety guards
 CONF_SENSOR_STALE_TIMEOUT_MINUTES = "sensor_stale_timeout_minutes"
@@ -193,10 +202,11 @@ DECISION_OFF = "off"
 DECISION_IDLE = "idle"
 DECISION_EMERGENCY_DEFICIT = "emergency_deficit"
 DECISION_OFF_PEAK_PRECHARGE = "off_peak_precharge"
+DECISION_OFF_PEAK_DEFERRED = "off_peak_deferred"
+DECISION_ENERGY_BALANCE_SATISFIED = "energy_balance_satisfied"
 DECISION_ANTICIPATED_DROP = "anticipated_drop"
 DECISION_OVERSHOOT_CUTOFF = "overshoot_cutoff"
 DECISION_HARD_OVERSHOOT_CUTOFF = "hard_overshoot_cutoff"
-DECISION_QUOTA_REACHED = "quota_reached"
 DECISION_SENSOR_STALE = "sensor_stale"
 DECISION_WINDOW_OPEN = "window_open"
 DECISION_STAGGERED_STARTUP = "staggered_startup"
@@ -212,10 +222,11 @@ DECISION_OPTIONS = [
     DECISION_IDLE,
     DECISION_EMERGENCY_DEFICIT,
     DECISION_OFF_PEAK_PRECHARGE,
+    DECISION_OFF_PEAK_DEFERRED,
+    DECISION_ENERGY_BALANCE_SATISFIED,
     DECISION_ANTICIPATED_DROP,
     DECISION_OVERSHOOT_CUTOFF,
     DECISION_HARD_OVERSHOOT_CUTOFF,
-    DECISION_QUOTA_REACHED,
     DECISION_SENSOR_STALE,
     DECISION_WINDOW_OPEN,
     DECISION_STAGGERED_STARTUP,

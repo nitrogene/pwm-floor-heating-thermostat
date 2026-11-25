@@ -11,6 +11,9 @@
           "heater": "Heater Switch / Actuator",
           "off_peak_sensor": "Off-Peak Tariff Sensor (Linky TIC / HC)",
           "off_peak_start_entity": "Scheduled Off-Peak Start Time Entity (input_datetime / sensor)",
+          "off_peak_end_entity": "Scheduled Off-Peak End Time Entity (input_datetime / sensor)",
+          "off_peak_duration_hours": "Off-Peak Window Duration (hours)",
+          "off_peak_comfort_margin": "Off-Peak Comfort Ceiling Margin (°C)",
           "dry_run": "Simulation / Shadow Mode (no physical switching)",
           "observed_heater": "Observed Physical Heater (for Shadow Mode comparison)",
           "heat_loss_wk": "Baseline / Initial Heat Loss Coefficient H (W/K)",
@@ -23,14 +26,12 @@
           "auto_calibrate_heat_loss": "Mode B Auto-Adaptation of Heat Loss H",
           "heat_loss_confidence_samples": "Mode B Confidence Samples for Direct Application",
           "auto_calibrate_dead_time": "Mode B Auto-Adaptation of Dead Time Theta",
-          "weather_entity": "Weather Service Entity (for 24h rolling forecast)",
-          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota",
+          "weather_entity": "Weather Service Entity (24h hourly forecast)",
           "sensor_stale_timeout_minutes": "Ambient Sensor Stale Timeout / Watchdog (minutes)",
           "max_continuous_run_minutes": "Global Maximum Continuous Run Duration (minutes)",
           "thermal_runaway_derivative": "Thermal Runaway Derivative Cutoff (°C/h)",
           "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)",
           "comfort_temp": "Comfort Preset Temperature (°C)",
-          "enforce_daily_quota_sensor": "Daily Quota Override Switch / Sensor",
           "window_detection_sensor": "Window Detection Master Switch / Sensor",
           "post_airing_recovery_minutes": "Post-Airing Stabilization Duration (minutes)",
           "post_airing_recovery_tolerance": "Post-Airing Early-Exit Tolerance (°C)",
@@ -47,6 +48,7 @@
     "error": {
       "missing_target_sensor": "An ambient temperature sensor is required.",
       "missing_outdoor_sensor": "An outdoor temperature sensor is required.",
+      "missing_weather_entity": "A weather forecast entity is required.",
       "heater_required_unless_dry_run": "A physical heater switch is required when Simulation / Shadow Mode is disabled."
     },
     "abort": {
@@ -63,11 +65,13 @@
           "observed_heater": "Observed Physical Heater",
           "heater": "Heater Switch / Actuator",
           "off_peak_start_entity": "Scheduled Off-Peak Start Time Entity (input_datetime / sensor)",
+          "off_peak_end_entity": "Scheduled Off-Peak End Time Entity (input_datetime / sensor)",
+          "off_peak_duration_hours": "Off-Peak Window Duration (hours)",
+          "off_peak_comfort_margin": "Off-Peak Comfort Ceiling Margin (°C)",
           "heat_loss_wk": "Baseline / Initial Heat Loss Coefficient H (W/K)",
           "power_watts": "Thermal Power (W)",
           "slab_tau_hours": "Slab Time Constant (hours)",
           "dead_time_hours": "Slab Dead Time (hours)",
-          "enforce_daily_quota": "Enforce Daily Energy Quota (Anti-Peak Hours)",
           "window_detection": "Airstream / Open Window Detection",
           "window_sensor": "Physical Window Contact Sensor",
           "eco_temp": "Eco Preset Temperature (°C)",
@@ -85,14 +89,12 @@
           "outdoor_precharge_max_temp": "Outdoor Precharge Max Temperature (°C)",
           "comfort_safety_deficit": "Comfort Safety Deficit Threshold (°C)",
           "rule_b_min_threshold": "Rule B Minimum Anticipation Threshold (°C)",
-          "weather_entity": "Weather Service Entity",
-          "use_weather_forecast_average": "Use 24h Rolling Weather Forecast for Daily Quota",
+          "weather_entity": "Weather Service Entity (24h hourly forecast)",
           "sensor_stale_timeout_minutes": "Ambient Sensor Stale Timeout / Watchdog (minutes)",
           "max_continuous_run_minutes": "Global Maximum Continuous Run Duration (minutes)",
           "thermal_runaway_derivative": "Thermal Runaway Derivative Cutoff (°C/h)",
           "hard_overshoot_margin": "Hard Ambient Overshoot Ceiling Margin (°C)",
           "comfort_temp": "Comfort Preset Temperature (°C)",
-          "enforce_daily_quota_sensor": "Daily Quota Override Switch / Sensor",
           "window_detection_sensor": "Window Detection Master Switch / Sensor",
           "post_airing_recovery_minutes": "Post-Airing Stabilization Duration (minutes)",
           "post_airing_recovery_tolerance": "Post-Airing Early-Exit Tolerance (°C)",
@@ -121,11 +123,14 @@
       "model_error_rms": {
         "name": "Model error RMS (24h)"
       },
-      "energy_quota_24h_kwh": {
-        "name": "24h energy quota"
+      "forecast_energy_need_24h_kwh": {
+        "name": "Forecast energy need (24h)"
       },
-      "heating_hours_remaining_24h": {
-        "name": "Remaining heating hours"
+      "slab_energy_in_transit_kwh": {
+        "name": "Slab energy in transit"
+      },
+      "planned_heating_hours": {
+        "name": "Planned heating hours"
       },
       "heat_loss_measured_wk": {
         "name": "Measured heat loss (Mode A)"
@@ -149,10 +154,11 @@
           "idle": "Idle",
           "emergency_deficit": "Emergency deficit",
           "off_peak_precharge": "Off-peak precharge",
+          "off_peak_deferred": "Off-peak deferred",
+          "energy_balance_satisfied": "Energy balance met",
           "anticipated_drop": "Anticipated drop",
           "overshoot_cutoff": "Overshoot cutoff",
           "hard_overshoot_cutoff": "Hard ceiling",
-          "quota_reached": "Quota reached",
           "sensor_stale": "Sensor stale",
           "window_open": "Window open",
           "staggered_startup": "Staggered start",

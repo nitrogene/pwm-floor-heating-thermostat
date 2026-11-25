@@ -193,15 +193,11 @@ def test_emergency_comfort_deficit_bypass(base_config):
         thermostat._temp_projected = 16.5
         thermostat._hvac_mode = HVACMode.HEAT
 
-        # Quota is exhausted
-        thermostat._enforce_daily_quota = True
-        thermostat._daily_energy_kwh = 25.0
-        thermostat._daily_quota_kwh = 15.0
+        # Even with slab energy already in transit, emergency deficit overrides unconditionally
+        thermostat._slab_energy_pulses = [(t0, 25.0)]
 
         with patch("homeassistant.util.dt.utcnow", return_value=t0):
             await thermostat._async_control_heating(now=t0)
-            # Must NOT be blocked by quota
-            assert "Daily thermal quota exhausted" not in thermostat._decision_reason
             assert "Emergency comfort deficit bypass" in thermostat._decision_reason
 
     asyncio.run(_test())
@@ -216,6 +212,7 @@ def test_v030_config_flow_and_options_flow():
             CONF_NAME: "Config Test",
             CONF_TARGET_SENSOR: "sensor.room_temp",
             CONF_OUTDOOR_SENSOR: "sensor.ext_temp",
+            "weather_entity": "weather.home",
             CONF_DRY_RUN: True,
             CONF_SENSOR_STALE_TIMEOUT_MINUTES: 120,
             CONF_MAX_CONTINUOUS_RUN_MINUTES: 180,

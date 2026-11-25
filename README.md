@@ -52,15 +52,40 @@ Traditional hydronic heating systems rely on a **Heating Curve (*Loi d'eau*)**, 
 2. **Phase Lag & The Morning Cold Dip**: When a winter night freeze occurs at 04:00 AM, a reactive heating curve responds at 04:00 AM. But with a theta = 2.25 h dead time, heat only emerges into the living space around 06:30 or 07:00 AM—resulting in the infamous morning temperature drop.
 3. **Blindness to Tariff Opportunities**: A heating curve forces heating whenever outdoor temperature is cold, regardless of peak electricity pricing.
 
-### The Solution: From Water Temperature Modulation to Time Modulation (PWM)
-Instead of varying supply temperature, **`pwm_floor_heating_thermostat` modulates the compressor operating time over a 24-hour horizon**:
-> `Daily Quota (kWh) = [ H * (T_setpoint - T_outdoor_avg) * 24h ] / 1000`
-> `Compressor Hours Needed = (Daily Quota * 1000) / P_thermal_watts`
+### The Solution: Unified Predictive Energy-Balance Engine (v0.4.0)
+Instead of varying supply temperature or running a blind midnight-reset quota, **`pwm_floor_heating_thermostat` computes a rolling 24-hour thermal demand curve** and tracks energy already propagating through the slab ($E_{\text{transit}}$):
+> `P_need(t) = H_eff * f_wind * max(0, T_target - T_ext(t))` [kW]
+> `E_net = max(0, ∫ P_need(t) dt - C_eff * (T_cur - T_target) - E_transit)` [kWh]
 
-### Role of `outdoor_sensor` / `outdoor_temperature_forecast`
-The slab acts as a physical low-pass thermal filter. The outdoor temperature that the slab "sees" as it delivers a heat pulse is not the instantaneous reading at minute t, but the thermal profile over the traversal window:
-* **Option A: Forecast Sliding Window (H0 -> H+4) [Recommended]**: Providing an outdoor temperature sensor averaged over the next 4 hours (e.g. from Météo-France or a weather integration) mirrors the exact heat loss profile the building will undergo while the injected heat wave travels through the screed.
-* **Option B: Real-Time Instantaneous Sensor**: If no forecast sensor is available, a standard outdoor probe works natively, with the model estimating the daily budget from continuous readings.
+#### 3-Tier Demand Curve Fallback Cascade (Mandatory `weather_entity` + `outdoor_sensor`)
+1. **Tier 1 (`weather_api` — Primary):** Hourly weather forecast curve over the next 24h via `weather.get_forecasts(type="hourly")` (15-min cache, persisted across restarts).
+2. **Tier 2 (`outdoor_persistence` — Local Fallback):** Rolling 24h local persistence profile from `outdoor_sensor` when the weather API is unavailable.
+3. **Tier 3 (`kalata_derivative` — Degraded Fallback):** Observed passive cooling derivative $dT/dt$ from the Kalata observer ($P \approx -C_{\text{eff}} \cdot dT/dt$) if `outdoor_sensor` is also unavailable or stale.
+
+#### Unified Off-Peak (HC) & Peak (HP) Regulation
+* **Off-Peak (HC) End-of-Window Scheduling:** Computes the exact energy required until the next off-peak slot, subtracts current excess room heat and $E_{\text{transit}}$, and schedules the required heating pulse(s) toward the **end of the off-peak window** (minimizing overnight losses and delivering comfort at wake-up). Strictly capped by a configurable `off_peak_comfort_margin` (default **`+0.3°C`**) so rooms never overshoot into the hard ceiling (`+1.0°C`).
+* **Peak (HP) Strict Top-Up:** Only triggers short top-up cycles (`peak_max_run_duration`, default `45 min`) if the trajectory drops **and** an energy deficit is predicted before the next off-peak window (preserving `-1.5°C` emergency and `-0.8°C` comfort safety overrides).
+
+#### Zero-Impact Home Assistant Restart Persistence
+All time-stamped model state is persisted in Home Assistant's `Store` (`.storage/pwm_floor_heating.<unique_id>`) and flushed on `EVENT_HOMEASSISTANT_STOP`: Danfoss FSM locks (`30 min` ON / `15 min` OFF), timestamped slab energy-in-transit pulses (`E_transit`), rolling 24h `outdoor_sensor` history, cached hourly weather curve, Kalata observer state, and open-window / post-airing recovery windows (`_window_recovery_until`). Elapsed downtime is accurately subtracted on boot.
+
+#### Companion Diagnostic Sensors (`v0.4.0`)
+| Sensor Key | Unit / Type | Description |
+| :--- | :--- | :--- |
+| `temp_projected_ahead` | °C | Projected room temperature at $t + \theta_{\text{eff}}$ |
+| `temp_derivative_hourly` | °C/h | Smoothed Kalata hourly temperature slope |
+| `model_error` / `model_error_rms` | °C | Live prediction error and 24h passive-cooling RMS |
+| `forecast_energy_need_24h_kwh` | kWh | Rolling 24h integral of the demand curve $P_{\text{need}}(t)$ |
+| `slab_energy_in_transit_kwh` | kWh | Thermal energy currently propagating through the slab ($E_{\text{transit}}$) |
+| `planned_heating_hours` | h | Remaining compressor runtime required over the active horizon |
+| `heat_loss_measured_wk` | W/K | Empirically measured heat loss $H$ (Mode A night cooling) |
+| `fsm_state` | enum | Compressor state (`idle`, `running_min_lock`, `running_normal`, `waiting_min_off`) |
+| `next_transition_time` | timestamp | Predicted next turn-on or turn-off timestamp |
+| `decision` | enum | Translated decision reason (`off_peak_precharge`, `off_peak_deferred`, `energy_balance_satisfied`, `anticipated_drop`, etc.) |
+
+#### Migration Guide (`v0.3.x` → `v0.4.0` Breaking Changes)
+* `weather_entity` is now **required** alongside `outdoor_sensor` in ConfigFlow / OptionsFlow.
+* Legacy midnight quota options and entities (`enforce_daily_quota`, `enforce_daily_quota_sensor`, `energy_quota_24h_kwh`, `heating_hours_remaining_24h`, `daily_quota_blocked`, `unserved_quota_carryover_hours`, `use_weather_forecast_average`) have been removed and replaced by `forecast_energy_need_24h_kwh`, `slab_energy_in_transit_kwh`, `planned_heating_hours`, `off_peak_comfort_margin`, `off_peak_end_entity`, and `off_peak_duration_hours`. Update Lovelace dashboards accordingly.
 
 ---
 
@@ -154,7 +179,9 @@ climate:
     heater: switch.living_room_compressor_relay
     target_sensor: sensor.living_room_temperature
     outdoor_sensor: sensor.outdoor_temperature_forecast
+    weather_entity: weather.home
     off_peak_sensor: binary_sensor.off_peak_electricity_tariff # Optional: French Linky TIC or energy tariff
+    off_peak_comfort_margin: 0.3                               # Max °C above target during Off-Peak charging
     
     # Building thermal characteristics
     heat_loss_wk: 60.0          # Thermal loss rate (W/K)
@@ -209,7 +236,10 @@ climate:
     name: "Living Room Simulation Shadow"
     target_sensor: sensor.living_room_temperature
     outdoor_sensor: sensor.outdoor_temperature_forecast
+    weather_entity: weather.home
     off_peak_sensor: binary_sensor.off_peak_electricity_tariff
+    off_peak_end_entity: input_datetime.off_peak_end          # Optional: end of Off-Peak window for end-of-HC scheduling
+    off_peak_comfort_margin: 0.3                              # Max °C above target during Off-Peak charging
     
     # Shadow mode configuration
     dry_run: true                                          # Disables physical relay switching!
@@ -220,10 +250,6 @@ climate:
     power_watts: 6500.0
     slab_tau_hours: 15.0
     dead_time_hours: 2.25
-    
-    # Anti-Peak Tariff Quota Enforcement
-    enforce_daily_quota: true                              # Inhibit unnecessary Peak-Hour cycles once daily quota is fulfilled
-    enforce_daily_quota_sensor: input_boolean.enforce_daily_quota_living_room # Optional: toggle switch directly in Lovelace UI
     
     # Open Window / Rapid Ventilation Detection
     window_detection: true                                 # Inhibit heating during rapid temperature drops or open window

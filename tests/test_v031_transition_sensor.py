@@ -102,18 +102,16 @@ def test_next_transition_when_running_in_off_peak_hours(base_config):
         mock_st.state = "on"
         hass.states.get.return_value = mock_st
 
-        # 1. Quota of 90 minutes remaining (< 120 min max continuous run)
-        thermostat._hours_needed_24h = 2.0
-        thermostat._hours_run_today = 0.5  # 1.5h remaining (90 min)
+        # 1. Planned heating of 90 minutes remaining (< 120 min max continuous run)
+        thermostat._planned_heating_hours = 1.5  # 90 min
         thermostat._update_next_transition_estimate(t0)
 
         assert thermostat._next_transition_type == "turn_off"
         assert thermostat._next_transition_time == t0 + timedelta(minutes=90)
-        assert "Daily thermal quota completion" in thermostat._next_transition_reason
+        assert "Predictive energy balance completion" in thermostat._next_transition_reason
 
-        # 2. Quota of 3 hours remaining -> capped by 120 min max continuous run
-        thermostat._hours_needed_24h = 4.0
-        thermostat._hours_run_today = 1.0  # 3.0h remaining
+        # 2. Planned heating of 3 hours remaining -> capped by 120 min max continuous run
+        thermostat._planned_heating_hours = 3.0
         thermostat._update_next_transition_estimate(t0)
 
         assert thermostat._next_transition_time == t0 + timedelta(minutes=120)

@@ -11,6 +11,9 @@
           "heater": "Actionneur / Relais de chauffe piloté",
           "off_peak_sensor": "Capteur Heures Creuses (Linky TIC / HC)",
           "off_peak_start_entity": "Entité heure de début des Heures Creuses (input_datetime / sensor)",
+          "off_peak_end_entity": "Entité heure de fin des Heures Creuses (input_datetime / sensor)",
+          "off_peak_duration_hours": "Durée de la plage Heures Creuses (heures)",
+          "off_peak_comfort_margin": "Marge de confort plafond en Heures Creuses (°C)",
           "dry_run": "Mode Simulation / Shadow Mode (aucun ordre physique)",
           "observed_heater": "Actionneur physique observé (comparaison Shadow Mode)",
           "heat_loss_wk": "Déperditions de référence (valeur initiale) H (W/K)",
@@ -25,13 +28,11 @@
           "auto_calibrate_dead_time": "Auto-adaptation douce du temps mort Thêta (Mode B)",
           "peak_max_run_duration": "Durée maximale d'un cycle en Heures Pleines (minutes)",
           "weather_entity": "Entité service météo (prévisions horaires 24h)",
-          "use_weather_forecast_average": "Calculer le quota journalier sur la moyenne météo 24h",
           "sensor_stale_timeout_minutes": "Délai d'inactivité de la sonde ambiante / Watchdog (minutes)",
           "max_continuous_run_minutes": "Durée maximale de marche continue globale (minutes)",
           "thermal_runaway_derivative": "Seuil de dérivée d'emballement thermique (°C/h)",
           "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)",
           "comfort_temp": "Température consigne Confort (°C)",
-          "enforce_daily_quota_sensor": "Interrupteur / Capteur d'activation du quota journalier",
           "window_detection_sensor": "Interrupteur / Capteur d'activation de la détection d'aération",
           "post_airing_recovery_minutes": "Durée de stabilisation post-aération (minutes)",
           "post_airing_recovery_tolerance": "Tolérance de sortie anticipée post-aération (°C)",
@@ -48,6 +49,7 @@
     "error": {
       "missing_target_sensor": "Une sonde de température ambiante est obligatoire.",
       "missing_outdoor_sensor": "Une sonde de température extérieure est obligatoire.",
+      "missing_weather_entity": "Une entité de prévisions météo est obligatoire.",
       "heater_required_unless_dry_run": "Un actionneur physique (relais) est obligatoire lorsque le mode Simulation / Shadow est désactivé."
     },
     "abort": {
@@ -64,11 +66,13 @@
           "observed_heater": "Actionneur physique observé",
           "heater": "Actionneur / Relais de chauffe piloté",
           "off_peak_start_entity": "Entité heure de début des Heures Creuses (input_datetime / sensor)",
+          "off_peak_end_entity": "Entité heure de fin des Heures Creuses (input_datetime / sensor)",
+          "off_peak_duration_hours": "Durée de la plage Heures Creuses (heures)",
+          "off_peak_comfort_margin": "Marge de confort plafond en Heures Creuses (°C)",
           "heat_loss_wk": "Déperditions de référence (valeur initiale) H (W/K)",
           "power_watts": "Puissance thermique utile (W)",
           "slab_tau_hours": "Constante de temps de la dalle (heures)",
           "dead_time_hours": "Temps mort de dalle (heures)",
-          "enforce_daily_quota": "Plafonner le quota énergétique journalier (Anti-HP)",
           "window_detection": "Détection d'aération active",
           "window_sensor": "Capteur d'ouverture de fenêtre",
           "eco_temp": "Température consigne Eco (°C)",
@@ -86,14 +90,12 @@
           "outdoor_precharge_max_temp": "Plafond température extérieure pour précharge HC (°C)",
           "comfort_safety_deficit": "Seuil de déficit thermique de sécurité confort (°C)",
           "rule_b_min_threshold": "Seuil plancher d'anticipation Règle B (°C)",
-          "weather_entity": "Entité service météo",
-          "use_weather_forecast_average": "Calculer le quota journalier sur la moyenne météo 24h",
+          "weather_entity": "Entité service météo (prévisions horaires 24h)",
           "sensor_stale_timeout_minutes": "Délai d'inactivité de la sonde ambiante / Watchdog (minutes)",
           "max_continuous_run_minutes": "Durée maximale de marche continue globale (minutes)",
           "thermal_runaway_derivative": "Seuil de dérivée d'emballement thermique (°C/h)",
           "hard_overshoot_margin": "Marge d'overshoot inconditionnel plafond (°C)",
           "comfort_temp": "Température consigne Confort (°C)",
-          "enforce_daily_quota_sensor": "Interrupteur / Capteur d'activation du quota journalier",
           "window_detection_sensor": "Interrupteur / Capteur d'activation de la détection d'aération",
           "post_airing_recovery_minutes": "Durée de stabilisation post-aération (minutes)",
           "post_airing_recovery_tolerance": "Tolérance de sortie anticipée post-aération (°C)",
@@ -122,11 +124,14 @@
       "model_error_rms": {
         "name": "Erreur quadratique moyenne modèle (RMS 24h)"
       },
-      "energy_quota_24h_kwh": {
-        "name": "Quota énergétique 24h"
+      "forecast_energy_need_24h_kwh": {
+        "name": "Besoin énergétique prévisionnel (24h)"
       },
-      "heating_hours_remaining_24h": {
-        "name": "Heures de chauffe restantes"
+      "slab_energy_in_transit_kwh": {
+        "name": "Énergie en transit (dalle)"
+      },
+      "planned_heating_hours": {
+        "name": "Heures de chauffe prévues"
       },
       "heat_loss_measured_wk": {
         "name": "Déperdition mesurée (Mode A)"
@@ -150,10 +155,11 @@
           "idle": "Au repos",
           "emergency_deficit": "Déficit critique",
           "off_peak_precharge": "Précharge HC",
+          "off_peak_deferred": "HC différée (fin plage)",
+          "energy_balance_satisfied": "Bilan énergétique atteint",
           "anticipated_drop": "Chute anticipée",
           "overshoot_cutoff": "Coupure overshoot",
           "hard_overshoot_cutoff": "Plafond absolu",
-          "quota_reached": "Quota atteint",
           "sensor_stale": "Sonde figée",
           "window_open": "Fenêtre ouverte",
           "staggered_startup": "Délai décalé",

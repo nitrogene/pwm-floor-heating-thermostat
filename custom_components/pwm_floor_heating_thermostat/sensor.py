@@ -95,25 +95,36 @@ SENSOR_TYPES: tuple[PwmSensorEntityDescription, ...] = (
         value_fn=lambda t: t._model_error_rms if hasattr(t, "_model_error_rms") else None,
     ),
     PwmSensorEntityDescription(
-        key="energy_quota_24h_kwh",
-        translation_key="energy_quota_24h_kwh",
+        key="forecast_energy_need_24h_kwh",
+        translation_key="forecast_energy_need_24h_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda t: round(t._energy_needed_kwh, 2)
-        if hasattr(t, "_energy_needed_kwh") and t._energy_needed_kwh is not None
+        value_fn=lambda t: round(t._forecast_energy_need_24h_kwh, 2)
+        if hasattr(t, "_forecast_energy_need_24h_kwh") and t._forecast_energy_need_24h_kwh is not None
         else None,
     ),
     PwmSensorEntityDescription(
-        key="heating_hours_remaining_24h",
-        translation_key="heating_hours_remaining_24h",
+        key="slab_energy_in_transit_kwh",
+        translation_key="slab_energy_in_transit_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda t: round(t._slab_energy_in_transit_kwh, 2)
+        if hasattr(t, "_slab_energy_in_transit_kwh") and t._slab_energy_in_transit_kwh is not None
+        else None,
+    ),
+    PwmSensorEntityDescription(
+        key="planned_heating_hours",
+        translation_key="planned_heating_hours",
         native_unit_of_measurement=UnitOfTime.HOURS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda t: round(max(0.0, t._hours_needed_24h - t._total_heating_hours_today), 2)
-        if hasattr(t, "_hours_needed_24h") and hasattr(t, "_total_heating_hours_today")
+        value_fn=lambda t: round(t._planned_heating_hours, 2)
+        if hasattr(t, "_planned_heating_hours") and t._planned_heating_hours is not None
         else None,
     ),
     PwmSensorEntityDescription(

@@ -26,8 +26,6 @@ from .const import (
     CONF_DEAD_TIME,
     CONF_DRY_RUN,
     CONF_ECO_TEMP,
-    CONF_ENFORCE_DAILY_QUOTA,
-    CONF_ENFORCE_DAILY_QUOTA_SENSOR,
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HARD_OVERSHOOT_MARGIN,
     CONF_HEAT_LOSS,
@@ -41,6 +39,9 @@ from .const import (
     CONF_MIN_FLOOR_TEMP,
     CONF_MIN_OFF_CYCLE_DURATION,
     CONF_OBSERVED_HEATER,
+    CONF_OFF_PEAK_COMFORT_MARGIN,
+    CONF_OFF_PEAK_DURATION_HOURS,
+    CONF_OFF_PEAK_END_ENTITY,
     CONF_OFF_PEAK_SENSOR,
     CONF_OFF_PEAK_START_ENTITY,
     CONF_OUTDOOR_PRECHARGE_MAX_TEMP,
@@ -55,7 +56,6 @@ from .const import (
     CONF_SOLAR_SENSOR,
     CONF_TARGET_SENSOR,
     CONF_THERMAL_RUNAWAY_DERIVATIVE,
-    CONF_USE_WEATHER_FORECAST_AVERAGE,
     CONF_WEATHER_ENTITY,
     CONF_WIND_SENSOR,
     CONF_WINDOW_DETECTION,
@@ -68,7 +68,6 @@ from .const import (
     DEFAULT_DEAD_TIME_HOURS,
     DEFAULT_DRY_RUN,
     DEFAULT_ECO_TEMP,
-    DEFAULT_ENFORCE_DAILY_QUOTA,
     DEFAULT_HARD_OVERSHOOT_MARGIN,
     DEFAULT_HEAT_LOSS,
     DEFAULT_HEAT_LOSS_CONFIDENCE_SAMPLES,
@@ -78,6 +77,8 @@ from .const import (
     DEFAULT_MAX_FLOOR_TEMP,
     DEFAULT_MIN_FLOOR_TEMP,
     DEFAULT_NAME,
+    DEFAULT_OFF_PEAK_COMFORT_MARGIN,
+    DEFAULT_OFF_PEAK_DURATION_HOURS,
     DEFAULT_OUTDOOR_PRECHARGE_MAX_TEMP,
     DEFAULT_POST_AIRING_RECOVERY_MINUTES,
     DEFAULT_POST_AIRING_RECOVERY_TOLERANCE,
@@ -87,7 +88,6 @@ from .const import (
     DEFAULT_SLAB_TAU_HOURS,
     DEFAULT_TARGET_TEMP,
     DEFAULT_THERMAL_RUNAWAY_DERIVATIVE,
-    DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
     DEFAULT_WINDOW_DETECTION,
     DOMAIN,
 )
@@ -109,11 +109,14 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             target_sensor = user_input.get(CONF_TARGET_SENSOR)
             outdoor_sensor = user_input.get(CONF_OUTDOOR_SENSOR)
+            weather_entity = user_input.get(CONF_WEATHER_ENTITY)
 
             if not target_sensor:
                 errors[CONF_TARGET_SENSOR] = "missing_target_sensor"
             if not outdoor_sensor:
                 errors[CONF_OUTDOOR_SENSOR] = "missing_outdoor_sensor"
+            if not weather_entity:
+                errors[CONF_WEATHER_ENTITY] = "missing_weather_entity"
             if not user_input.get(CONF_DRY_RUN) and not user_input.get(CONF_HEATER):
                 errors[CONF_HEATER] = "heater_required_unless_dry_run"
 
@@ -136,6 +139,9 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_OUTDOOR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor", "weather"])
                 ),
+                vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["weather"])
+                ),
                 vol.Optional(CONF_HEATER): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["switch", "climate", "input_boolean"])
                 ),
@@ -144,6 +150,33 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_OFF_PEAK_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                ),
+                vol.Optional(CONF_OFF_PEAK_END_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                ),
+                vol.Optional(
+                    CONF_OFF_PEAK_DURATION_HOURS,
+                    default=DEFAULT_OFF_PEAK_DURATION_HOURS,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1.0,
+                        max=16.0,
+                        step=0.5,
+                        unit_of_measurement="h",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_OFF_PEAK_COMFORT_MARGIN,
+                    default=DEFAULT_OFF_PEAK_COMFORT_MARGIN,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=0.5,
+                        step=0.05,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 ),
                 vol.Required(CONF_DRY_RUN, default=DEFAULT_DRY_RUN): selector.BooleanSelector(),
                 vol.Optional(CONF_OBSERVED_HEATER): selector.EntitySelector(
@@ -214,13 +247,6 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_AUTO_CALIBRATE_DEAD_TIME,
                     default=DEFAULT_AUTO_CALIBRATE_DEAD_TIME,
                 ): selector.BooleanSelector(),
-                vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["weather"])
-                ),
-                vol.Optional(
-                    CONF_USE_WEATHER_FORECAST_AVERAGE,
-                    default=DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
-                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_SENSOR_STALE_TIMEOUT_MINUTES,
                     default=DEFAULT_SENSOR_STALE_TIMEOUT_MINUTES,
@@ -280,9 +306,6 @@ class PwmFloorHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.BOX,
                     )
-                ),
-                vol.Optional(CONF_ENFORCE_DAILY_QUOTA_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
                 ),
                 vol.Optional(CONF_WINDOW_DETECTION_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
@@ -415,6 +438,40 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
                 ),
+                vol.Optional(
+                    CONF_OFF_PEAK_END_ENTITY,
+                    description={"suggested_value": curr.get(CONF_OFF_PEAK_END_ENTITY)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                ),
+                vol.Required(
+                    CONF_OFF_PEAK_DURATION_HOURS,
+                    default=float(
+                        curr.get(CONF_OFF_PEAK_DURATION_HOURS, DEFAULT_OFF_PEAK_DURATION_HOURS)
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1.0,
+                        max=16.0,
+                        step=0.5,
+                        unit_of_measurement="h",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_OFF_PEAK_COMFORT_MARGIN,
+                    default=float(
+                        curr.get(CONF_OFF_PEAK_COMFORT_MARGIN, DEFAULT_OFF_PEAK_COMFORT_MARGIN)
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=0.5,
+                        step=0.05,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
                 vol.Required(
                     CONF_HEAT_LOSS,
                     default=float(curr.get(CONF_HEAT_LOSS, DEFAULT_HEAT_LOSS)),
@@ -462,16 +519,6 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         unit_of_measurement="h",
                         mode=selector.NumberSelectorMode.BOX,
                     )
-                ),
-                vol.Required(
-                    CONF_ENFORCE_DAILY_QUOTA,
-                    default=bool(curr.get(CONF_ENFORCE_DAILY_QUOTA, DEFAULT_ENFORCE_DAILY_QUOTA)),
-                ): selector.BooleanSelector(),
-                vol.Optional(
-                    CONF_ENFORCE_DAILY_QUOTA_SENSOR,
-                    description={"suggested_value": curr.get(CONF_ENFORCE_DAILY_QUOTA_SENSOR)},
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean", "switch"])
                 ),
                 vol.Required(
                     CONF_WINDOW_DETECTION,
@@ -720,21 +767,12 @@ class PwmFloorHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Optional(
+                vol.Required(
                     CONF_WEATHER_ENTITY,
-                    description={"suggested_value": curr.get(CONF_WEATHER_ENTITY)},
+                    default=curr.get(CONF_WEATHER_ENTITY, ""),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["weather"])
                 ),
-                vol.Required(
-                    CONF_USE_WEATHER_FORECAST_AVERAGE,
-                    default=bool(
-                        curr.get(
-                            CONF_USE_WEATHER_FORECAST_AVERAGE,
-                            DEFAULT_USE_WEATHER_FORECAST_AVERAGE,
-                        )
-                    ),
-                ): selector.BooleanSelector(),
                 vol.Required(
                     CONF_SENSOR_STALE_TIMEOUT_MINUTES,
                     default=int(

@@ -43,13 +43,13 @@ def test_diagnostics_returns_sanitized_data():
         thermostat._wind_factor = 1.05
         thermostat._wind_speed = 25.0
         thermostat._power_watts = 3250.0
-        thermostat._energy_needed_kwh = 3.6
-        thermostat._ambient_trim_ratio = 1.0
+        thermostat._forecast_energy_need_24h_kwh = 3.6
+        thermostat._slab_energy_in_transit_kwh = 0.85
+        thermostat._planned_heating_hours = 0.61
+        thermostat._demand_curve_tier = "weather_api"
+        thermostat._off_peak_comfort_margin = 0.3
         thermostat._solar_credit_kwh = 0.5
-        thermostat._hours_needed_24h = 1.11
         thermostat._hours_run_today = 0.5
-        thermostat._enforce_daily_quota = True
-        thermostat._quota_blocked = False
         thermostat._window_detection_enabled = True
         thermostat._window_open = False
         thermostat._heat_loss_measured_wk = 14.8
@@ -83,16 +83,17 @@ def test_diagnostics_returns_sanitized_data():
         assert live["dead_time_measured_hours"] == 2.30
         assert live["dead_time_samples_count"] == 3
         assert live["auto_calibrate_dead_time"] is False
-        assert live["energy_quota_24h_kwh"] == 3.6
-        assert live["heating_hours_needed_24h"] == 1.11
+        assert live["forecast_energy_need_24h_kwh"] == 3.6
+        assert live["slab_energy_in_transit_kwh"] == 0.85
+        assert live["planned_heating_hours"] == 0.61
+        assert live["demand_curve_tier"] == "weather_api"
+        assert live["off_peak_comfort_margin"] == 0.3
         assert live["heating_hours_done_today"] == 0.5
-        assert live["heating_hours_remaining_24h"] == 0.61
         assert live["heat_loss_factor_wk"] == 15.0
         assert live["effective_heat_loss_wk"] == 14.8
         assert live["auto_calibrate_heat_loss"] is True
         assert live["wind_factor"] == 1.05
         assert live["wind_speed"] == 25.0
-        assert live["ambient_trim_ratio"] == 1.0
         assert live["solar_credit_kwh"] == 0.5
         assert live["peak_max_run_duration_min"] == 45
         assert live["compressor_cycles_today"] == 2

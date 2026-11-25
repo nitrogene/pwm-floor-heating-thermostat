@@ -1,61 +1,47 @@
 # Development Roadmap & Technical Specifications (TODO.md)
 
-This document tracks all **pending tasks, bug fixes, algorithmic improvements, and technical milestones** for the **PWM Floor Heating Thermostat** (`pwm_floor_heating_thermostat`) integration following the v0.3.2 code review.
+This document tracks all **pending tasks, bug fixes, algorithmic improvements, and technical milestones** for the **PWM Floor Heating Thermostat** (`pwm_floor_heating_thermostat`) integration.
 All items are strictly ordered from **most critical to least critical**.
 
 ---
 
-## 1. Critical / Blocking Fixes (Mechanical & Regulation Safety)
+## 0. v0.4.0 — Unified Predictive Energy-Balance Engine (HC/HP & Forecast Curve)
 
-- [x] **[BLOCKING - F-01] Preserve Danfoss 30-Minute Minimum Runtime Lock Across Restarts & Reloads (`climate.py:624-634`, `climate.py:2127-2148`) :**
-  - Persist `_fsm_state`, `_last_state_change`, and `_cycle_start_time` in the self-contained Home Assistant `Store`.
-  - In `async_added_to_hass`, if the physical `heater` switch is currently `"on"` (or was in `FSM_RUNNING_MIN_LOCK` / `FSM_RUNNING_NORMAL`), restore the active running state and original `_cycle_start_time` / `_last_state_change` instead of forcing `FSM_WAITING_MIN_OFF`.
-  - Ensure the active reconciliation guard in `_async_stop_heating_safe()` never cuts off a running compressor before `min_cycle_duration` (30 min) has elapsed since its actual start time.
-- [x] **[BLOCKING - F-03] Fix Minutes-vs-Seconds Unit Mismatch on `peak_max_run_duration` (`config_flow.py:497-511`, `climate.py:268-285`, `climate.py:376-378`, `climate.py:1780`) :**
-  - `OptionsFlow` stores `CONF_PEAK_MAX_RUN_DURATION` as a number in **minutes** (e.g. `45`), whereas `_parse_timedelta` interprets numeric `int`/`float` values as **seconds** (`45s`), resulting in `peak_max_run_duration_min: 0` and prematurely cutting off every Peak-Hour heating cycle at 30 minutes via Rule G.
-  - Explicitly parse numeric `CONF_PEAK_MAX_RUN_DURATION` values as **minutes** (`timedelta(minutes=float(val))`), and guard Rule G with `if self._peak_max_run_duration.total_seconds() > 0:`.
-- [x] **[BLOCKING - F-02] Verify Physical Actuator State Transitions (Closed-Loop FSM Confirmation) (`climate.py:2104-2121`, `climate.py:2172-2189`) :**
-  - Without coupling the integration to any specific hardware controller (preserving the v0.3.2 decoupling architecture), prevent phantom FSM transitions when a hardware controller (e.g. ESPHome local safety guard or manual override) rejects a `turn_on` command.
-  - Verify that `self._heater_entity` actually transitions to `"on"` (or reconcile back to `FSM_IDLE` without incrementing `_cycles_today` or accumulating `_hours_run_today` if the switch remains `"off"` after a short confirmation grace window).
+*Architectural overhaul replacing the legacy midnight-reset daily quota and greedy Rule A off-peak precharge with a unified, forecast-driven predictive energy-balance model (MPC).*
 
----
+### Critical / Core Regulation Engine
+- [x] **[CORE - M-01] Require Weather API & External Sensor with 3-Tier Forecast Curve Fallback (`config_flow.py`, `climate.py`) :**
+  - Make `weather_entity` (hourly forecast API) and `outdoor_sensor` mandatory in `ConfigFlow` and `OptionsFlow`.
+  - Build a unified hourly heat-loss demand curve $P_{\text{need}}(t) = H_{\text{eff}} \cdot f_{\text{wind}} \cdot \max(0, T_{\text{target}} - T_{\text{ext}}(t))$ over a rolling 24h horizon using a strict 3-tier fallback cascade:
+    - **Tier 1 (Primary):** Hourly forecast from `weather_entity` (`weather.get_forecasts(type="hourly")`, 15-min cache).
+    - **Tier 2 (Local fallback):** Rolling 24h persistence/average profile from `outdoor_sensor` when the weather API is unavailable.
+    - **Tier 3 (Degraded fallback):** Observed passive cooling derivative $dT/dt$ from the Kalata observer ($P \approx -C \cdot dT/dt$) when `outdoor_sensor` is also unavailable.
+- [x] **[CORE - M-02] Slab In-Transit Energy Tracker ($E_{\text{transit}}$) & Closed-Loop Recalibration (`climate.py`, `Store`) :**
+  - Track active and recently injected thermal energy still propagating through the slab over the effective dead time $\theta_{\text{eff}}$ (`slab_energy_in_transit_kwh`), persisted across restarts in `Store`.
+  - Combine $E_{\text{transit}}$ with the room's current thermal state $C_{\text{eff}} \cdot (T_{\text{cur}} - T_{\text{target}})$ (where $C_{\text{eff}} = H_{\text{eff}} \cdot \tau$) so that free heat gains (sun, appliances, adjacent rooms) continuously recalibrate the reservoir in closed loop and prevent back-to-back blind cycles.
+- [x] **[CORE - M-03] Unified HC/HP Decision Engine with End-of-Off-Peak Scheduling (`climate.py`) :**
+  - Remove legacy greedy Rule A (`off_peak_precharge` ignoring quota) and legacy midnight-reset daily quota / `unserved_quota_carryover_hours`.
+  - **Off-Peak (HC) scheduling:** Compute total predicted heat losses until the next off-peak window, subtract current excess room energy and $E_{\text{transit}}$, and schedule the required heating pulse(s) ($\ge 30\text{ min}$ Danfoss minimum) toward the **end of the off-peak window** (accounting for inter-zone `stagger_delay` and `off_peak_end_entity` / configurable off-peak duration) to minimize overnight losses and deliver comfort at wake-up.
+  - **Off-Peak comfort ceiling (`off_peak_comfort_margin`):** Add configurable upper margin (default `+0.3°C`, range `0.0°C` to `0.5°C`) in `ConfigFlow` / `OptionsFlow`; inhibit or stop off-peak charging whenever $T_{\text{cur}}$ or projected peak temperature exceeds $T_{\text{target}} + \text{off\_peak\_comfort\_margin}$.
+  - **Peak (HP) strict top-up:** Only trigger heating during peak hours if the projected energy balance (including $E_{\text{transit}}$) predicts a drop below $T_{\text{target}} - \text{threshold}$ **before** the next off-peak window, keeping short cycles (`peak_max_run_duration`, default `45 min`) and preserving all safety overrides (Rule 0 `-1.5°C` emergency deficit, `-0.8°C` comfort safety deficit, Hard Overshoot Cutoff, Thermal Runaway, Open Window, Danfoss 30/15 locks).
 
-## 2. Major Fixes (Thermodynamic Model, Safeties & Home Assistant Integration)
+- [x] **[CORE - M-04] Zero-Impact Home Assistant Restart Persistence (`climate.py`, `Store`) :**
+  - Ensure a Home Assistant restart or integration reload has zero behavioral impact on ongoing thermal calculations by persisting all time-stamped model state in `Store` (flushed on `EVENT_HOMEASSISTANT_STOP`):
+    - Timestamped slab energy-in-transit pulses (`[[ts_utc, kwh], ...]` over the last ~4h) so elapsed downtime is accurately subtracted on boot.
+    - Rolling 24h hourly `outdoor_sensor` history (up to 24 hourly points) so Tier 2 local fallback is immediately ready after reboot.
+    - Last valid hourly weather forecast curve (with timestamps) so Tier 1 survives a reboot during a brief weather API outage.
+    - Open-window and post-airing recovery timestamps (`_window_open`, `_window_open_time`, `_window_recovery_until`, and recent `_temp_history`) so rebooting shortly after airing never triggers a spurious emergency heating cycle.
 
-- [x] **[MAJOR - F-07] Fix Mode A / Mode B Heat Loss ($H$) Auto-Calibration Downward Drift (`climate.py:1525-1541`, `climate.py:1848-1873`) :**
-  - `_heat_loss_samples_count` is currently incremented every minute during `_async_control_heating` whenever `_derivative_smooth < -0.05`, including daytime periods with solar or internal heat gains. This reaches `heat_loss_confidence_samples` (10) within 10 minutes and unlocks unconstrained downward drift to `0.5 W/K`.
-  - Restrict Mode A sampling to genuine night-time cooling windows (e.g. 23:00–06:00 local time, zero solar irradiance), throttle sample counting to at most 1 sample per hour (or 1 consolidated sample per night), and enforce a realistic lower safety bound (e.g. `>= 0.5 * self._heat_loss`) even after `heat_loss_confidence_samples` is reached.
-- [x] **[MAJOR - F-08] Prevent Rule B Anticipation Paralysis from Positive-Slope Projection Errors (`climate.py:1376`, `climate.py:1401-1415`, `climate.py:1675-1688`, `const.py:51`) :**
-  - Linear tangent extrapolation over `dead_time` during solar gains or active heating inflates `model_error_rms`, pushing `rule_b_threshold = 2.0 * RMS` above `1.1°C–2.5°C` and completely disabling Peak-Hour dead-time anticipation.
-  - Lower `DEFAULT_KALATA_PROCESS_NOISE` from `0.005` to `0.001`, restrict `_model_error_history` accumulation to passive cooling regimes (or cap `rule_b_threshold` at a sane ceiling such as `0.6°C`).
-- [x] **[MAJOR - F-04] Decouple Safety Guards from Outdoor Sensor Availability (`climate.py:1653-1748`) :**
-  - Move Rule 0 (Emergency comfort deficit bypass), Rule C / Hard Ambient Overshoot Ceiling cutoff, Stale Sensor Watchdog cutoff, and Rule E (Open window cutoff) outside the `if self._cur_temp is not None and self._outdoor_temp is not None:` block so they remain active even when `outdoor_sensor` is temporarily `unavailable`.
-- [x] **[MAJOR - F-05] Harden Stale Sensor Watchdog Across Restarts & Cover Outdoor Sensor (`climate.py:491`, `climate.py:1426-1441`, `climate.py:1489-1503`) :**
-  - Persist `_cur_temp_ts` and `_outdoor_temp_ts` in the `Store` (updating timestamps on genuine sensor updates rather than trusting HA boot-time `last_updated` resets).
-  - Evaluate `_outdoor_temp_ts` in the watchdog or fall back cleanly when the outdoor sensor is stale.
-- [x] **[MAJOR - F-09] Expose Smoothed Derivative `_derivative_smooth` in Companion Sensor & Diagnostics (`sensor.py:70`, `diagnostics.py:58`) :**
-  - Replace `t._temp_derivative` (raw unsmoothed Kalata velocity) with `t._derivative_smooth` (`tau_v = 1.0 h` low-pass filtered derivative) in `sensor.py` and `diagnostics.py` to match `climate.py:956`.
-- [x] **[MAJOR - F-10] Fix Execution Order and Derivative Source in `_check_window_open_state` (`climate.py:1048-1049`, `climate.py:1268`, `climate.py:1281`, `climate.py:1505-1521`) :**
-  - Update `_temp_history` and the Kalata observer **before** calling `_check_window_open_state`, and use `_derivative_smooth` (or properly updated state) Consistently.
-- [x] **[MAJOR - F-11] Expose Missing Configuration Keys in UI ConfigFlow & OptionsFlow (`config_flow.py:118-258`, `config_flow.py:299-664`) :**
-  - Add `CONF_ENFORCE_DAILY_QUOTA_SENSOR`, `CONF_WINDOW_DETECTION_SENSOR`, `CONF_COMFORT_TEMP`, `CONF_MIN_CYCLE_DURATION`, `CONF_MIN_OFF_CYCLE_DURATION`, and `CONF_MAX_CYCLES_PER_DAY` to the UI flows so UI-configured entries have full feature parity with YAML.
-- [x] **[MAJOR - F-13] Remove Blocking Synchronous `open()` Call at Module Import Time (`const.py:8-18`) :**
-  - Replace the import-time `open("manifest.json")` call in `const.py` with a static `INTEGRATION_VERSION = "0.3.2"` constant verified against `manifest.json` via a unit test, eliminating Home Assistant 2024.6+ event-loop blocking I/O warnings.
-- [x] **[MAJOR - F-14] Strengthen Unit Test Suite Against Mocking Blind Spots (`tests/test_fsm.py`, `tests/conftest.py`, `tests/test_config_flow.py`) :**
-  - Replace the standalone `MockDanfossFSM` in `tests/test_fsm.py` with tests against `PwmFloorHeatingThermostat`.
-  - Add an end-to-end `OptionsFlow` $\rightarrow$ `async_setup_entry` unit test verifying parameter units (`peak_max_run_duration`, `stagger_delay`), restart during `FSM_RUNNING_MIN_LOCK` with active reconciliation, and safety evaluation when `outdoor_sensor` is `None`.
-
----
-
-## 3. Minor Improvements (Performance, Code Hygiene, CI & Packaging)
-
-- [x] **[MINOR - F-15] Cache `weather.get_forecasts` Responses (`climate.py:1167-1227`, `climate.py:1575-1576`) :**
-  - Throttle `weather.get_forecasts` service calls with a 15-minute TTL cache (`WEATHER_FORECAST_CACHE_TTL_SECONDS = 900`, invalidated on `weather_entity` state change) instead of calling the service every 60 seconds per zone.
-- [x] **[MINOR - F-16] Clean Up Hardcoded Entity Names, Dead Code & Deprecated OptionsFlow Init (`climate.py`, `sensor.py`, `config_flow.py`) :**
-  - Replaced hardcoded French `input_datetime.heures_creuses_*` entity IDs with optional configurable `CONF_OFF_PEAK_START_ENTITY` (`off_peak_start_entity`) and `off_peak_sensor` attribute lookup.
-  - Removed dead `_handle_thermostat_update` in `sensor.py` and unused `async_dispatcher_send` in `climate.py`.
-  - Modernized `PwmFloorHeatingConfigFlow.async_get_options_flow` for Home Assistant 2024.11+ while preserving unit test compatibility.
-- [x] **[MINOR - F-17] Align Packaging Metadata & CI Workflows (`pyproject.toml:7`, `manifest.json:9`, `.github/workflows/release.yaml:10-12`, `.github/workflows/validate.yaml:56`) :**
-  - Synced `pyproject.toml` version (`0.3.2`) with `manifest.json`.
-  - Updated `iot_class` in `manifest.json` from `"local_push"` to `"calculated"`.
-  - Translated French input description in `.github/workflows/release.yaml` to English and added `voluptuous` to `.github/workflows/validate.yaml`.
+### Breaking Changes, Companion Sensors & Validation
+- [x] **[BREAKING - M-05] Replace Legacy Quota Sensors & Config Options with Dedicated Predictive Energy Sensors (`sensor.py`, `config_flow.py`, `diagnostics.py`, `translations/`) :**
+  - Remove legacy quota entities and options (`enforce_daily_quota`, `enforce_daily_quota_sensor`, `energy_quota_24h_kwh`, `heating_hours_remaining_24h`, `daily_quota_blocked`, `unserved_quota_carryover_hours`).
+  - Expose new dedicated companion sensors with full EN/FR translations:
+    - `forecast_energy_need_24h_kwh` (rolling 24h integral of the weather demand curve)
+    - `slab_energy_in_transit_kwh` (energy currently propagating through the slab)
+    - `planned_heating_hours` (remaining compressor hours required to cover the horizon)
+    - Update `next_transition_time` lookahead to reflect end-of-off-peak scheduled start/stop times.
+- [x] **[TESTS & RELEASE - M-06] Simulation, Full Test Suite, README Update & v0.4.0 Release (`tests/`, `CHANGELOG.md`, `README.md`, `manifest.json`) :**
+  - Add unit and E2E tests covering the 3-tier fallback cascade, $E_{\text{transit}}$ propagation & persistence, end-of-HC placement, `+0.3°C` HC comfort margin, strict HP top-up, midnight-crossing stability, and zero-impact HA restart recovery (mid-cycle, post-airing, and during weather outage).
+  - Update `README.md` thoroughly (unified HC/HP architecture, mandatory weather/outdoor inputs & 3-tier fallback, end-of-HC scheduling, zero-impact restart persistence, new companion sensors table, and v0.3.x $\to$ v0.4.0 migration guide).
+  - Finalize `CHANGELOG.md` breaking-change notes and validate 100% CI (Pytest, Ruff, Hassfest, HACS) before tagging `v0.4.0`.
+  - *(Downstream `MyHomeAutomation` follow-up)* Update `dashboards/maison.yaml`, `config/packages/geothermie.yaml`, and `pwm.md` for the new v0.4.0 companion sensors and removal of `input_boolean.plafonnement_quota_*`.

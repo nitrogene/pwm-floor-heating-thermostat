@@ -37,8 +37,6 @@ async def async_get_config_entry_diagnostics(
         thermostat = thermostat.thermostat
 
     if thermostat:
-        hours_needed = getattr(thermostat, "_hours_needed_24h", 0.0)
-        hours_done = getattr(thermostat, "_hours_run_today", 0.0)
         stagger_sec = MULTI_ZONE_STARTUP_COOLDOWN_SECONDS
         peak_dur = getattr(thermostat, "_peak_max_run_duration", None)
         peak_dur_min = int(peak_dur.total_seconds() // 60) if peak_dur else None
@@ -73,14 +71,13 @@ async def async_get_config_entry_diagnostics(
             "wind_factor": getattr(thermostat, "_wind_factor", None),
             "wind_speed": getattr(thermostat, "_wind_speed", None),
             "compressor_power_watts": getattr(thermostat, "_power_watts", None),
-            "energy_quota_24h_kwh": getattr(thermostat, "_energy_needed_kwh", None),
-            "ambient_trim_ratio": getattr(thermostat, "_ambient_trim_ratio", None),
+            "forecast_energy_need_24h_kwh": getattr(thermostat, "_forecast_energy_need_24h_kwh", None),
+            "slab_energy_in_transit_kwh": getattr(thermostat, "_slab_energy_in_transit_kwh", None),
+            "planned_heating_hours": getattr(thermostat, "_planned_heating_hours", None),
+            "demand_curve_tier": getattr(thermostat, "_demand_curve_tier", None),
+            "off_peak_comfort_margin": getattr(thermostat, "_off_peak_comfort_margin", None),
             "solar_credit_kwh": getattr(thermostat, "_solar_credit_kwh", None),
-            "heating_hours_needed_24h": hours_needed,
-            "heating_hours_done_today": hours_done,
-            "heating_hours_remaining_24h": round(max(0.0, hours_needed - hours_done), 2),
-            "daily_quota_enforced": getattr(thermostat, "_enforce_daily_quota", None),
-            "daily_quota_blocked": getattr(thermostat, "_quota_blocked", None),
+            "heating_hours_done_today": getattr(thermostat, "_hours_run_today", 0.0),
             "window_detection_active": getattr(thermostat, "_window_detection_enabled", None),
             "window_open_detected": getattr(thermostat, "_window_open", None),
             "heat_loss_measured_wk": getattr(thermostat, "_heat_loss_measured_wk", None),
@@ -89,10 +86,8 @@ async def async_get_config_entry_diagnostics(
             "simulated_heater_state": getattr(thermostat, "_simulated_heater_state", None),
             "stagger_delay_sec": stagger_sec,
             "weather_entity": getattr(thermostat, "_weather_entity", None),
-            "use_weather_forecast_average": getattr(thermostat, "_use_weather_forecast_average", None),
             "forecast_outdoor_temp_24h": getattr(thermostat, "_forecast_outdoor_temp_24h", None),
             "weather_outage_fallback_active": getattr(thermostat, "_weather_outage_fallback_active", None),
-            "unserved_quota_carryover_hours": getattr(thermostat, "_unserved_quota_carryover_hours", None),
             "peak_max_run_duration_min": peak_dur_min,
             "compressor_cycles_today": getattr(thermostat, "_cycles_today", None),
             "max_cycles_budget": getattr(thermostat, "_max_cycles", None),

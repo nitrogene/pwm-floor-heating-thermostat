@@ -137,7 +137,7 @@ def test_e2e_dtu_max_floor_cutoff_and_freeze_safeties(mock_hass, base_config):
         with patch("homeassistant.util.dt.utcnow", return_value=t0):
             await thermostat._async_control_heating(now=t0)
             assert thermostat._decision_reason is not None
-            assert "Anticipated thermal drop" in thermostat._decision_reason
+            assert "Peak-hour strict top-up" in thermostat._decision_reason
 
         # Slab overheat: floor return reaches 28.5°C >= 28.0°C -> immediate cutoff
         thermostat._floor_temp = 28.5
@@ -161,11 +161,11 @@ def test_e2e_rule_g_peak_hour_run_cap(mock_hass, base_config):
 
     async def _test():
         base_config["peak_max_run_duration"] = "00:45:00"
-        base_config["enforce_daily_quota"] = False
+        base_config["heat_loss_wk"] = 45.0
         thermostat = PwmFloorHeatingThermostat(mock_hass, base_config)
         thermostat._cur_temp = 18.5
         thermostat._target_temp = 19.0
-        thermostat._outdoor_temp = 5.0
+        thermostat._outdoor_temp = 0.0
         thermostat._temp_projected = 18.0
         thermostat._hvac_mode = HVACMode.HEAT
 

@@ -108,6 +108,7 @@ def test_config_flow_success():
             CONF_NAME: "Salon Thermostat",
             CONF_TARGET_SENSOR: "sensor.temp_salon",
             CONF_OUTDOOR_SENSOR: "sensor.temp_ext",
+            "weather_entity": "weather.home",
             CONF_HEATER: "switch.relais_salon",
             CONF_HEAT_LOSS: 35.0,
             CONF_POWER_WATTS: 6500.0,
@@ -137,6 +138,7 @@ def test_config_flow_abort_if_already_configured():
             CONF_NAME: "Salon Thermostat",
             CONF_TARGET_SENSOR: "sensor.temp_salon",
             CONF_OUTDOOR_SENSOR: "sensor.temp_ext",
+            "weather_entity": "weather.home",
             CONF_HEATER: "switch.relais_salon",
         }
 
