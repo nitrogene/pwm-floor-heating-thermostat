@@ -31,6 +31,7 @@ from custom_components.pwm_floor_heating_thermostat.const import (
     CONF_WEATHER_ENTITY,
     DECISION_ANTICIPATED_DROP,
     DECISION_ENERGY_BALANCE_SATISFIED,
+    DECISION_IDLE,
     DECISION_OFF_PEAK_DEFERRED,
     DECISION_OFF_PEAK_PRECHARGE,
     DECISION_OVERSHOOT_CUTOFF,
@@ -398,5 +399,51 @@ def test_zero_impact_restart_persistence_store_roundtrip(base_config):
             await t2._async_control_heating(now=t_reboot)
             assert t2._demand_curve_tier == DEMAND_CURVE_TIER_WEATHER_API
             assert "Emergency comfort deficit" not in t2._decision_reason
+
+    asyncio.run(_test())
+
+
+def test_decision_key_resets_to_idle_when_room_stabilizes(base_config):
+    """Verify decision_key returns to idle on next tick instead of sticking to energy_balance_satisfied."""
+
+    async def _test():
+        t0 = datetime(2026, 11, 25, 11, 0, 0, tzinfo=UTC)
+        t_next_hc = datetime(2026, 11, 25, 21, 6, 0, tzinfo=UTC)
+        hass = _mock_hass_states(
+            {
+                "weather.meteo_france": ("cloudy", {}),
+                "binary_sensor.heures_creuses_nuit": ("off", {"next_start": t_next_hc.isoformat()}),
+            }
+        )
+        forecasts = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 6.5}
+            for i in range(24)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.meteo_france": {"forecast": forecasts}}
+        )
+
+        thermostat = PwmFloorHeatingThermostat(hass, base_config)
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._target_temp = 19.0
+        thermostat._outdoor_temp = 7.5
+        thermostat._slab_energy_pulses = [(t0, 2.2)]
+
+        # Tick 1: room slightly cold (18.6°C), but covered by E_transit -> energy_balance_satisfied
+        thermostat._cur_temp = 18.6
+        thermostat._temp_projected = 18.5
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+        assert thermostat._decision_key == DECISION_ENERGY_BALANCE_SATISFIED
+
+        # Tick 2: room warms up to 19.2°C (stable) -> must transition cleanly back to idle!
+        t1 = t0 + timedelta(minutes=15)
+        thermostat._cur_temp = 19.2
+        thermostat._filtered_temp = 19.2
+        thermostat._temp_projected = 19.3
+        with patch("homeassistant.util.dt.utcnow", return_value=t1):
+            await thermostat._async_control_heating(now=t1)
+        assert thermostat._decision_key == DECISION_IDLE
+        assert "Idle (stable trajectory" in thermostat._decision_reason
 
     asyncio.run(_test())

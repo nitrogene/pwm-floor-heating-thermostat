@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-INTEGRATION_VERSION = "0.4.0"
+INTEGRATION_VERSION = "0.4.1"
 
 
 def get_integration_version() -> str:

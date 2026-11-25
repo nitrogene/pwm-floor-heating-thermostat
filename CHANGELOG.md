@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-11-25
+
+### Fixed
+- **Stale Decision Key Across Control Ticks**: Replaced the cross-tick `self._decision_key` exclusion guard with a per-tick `decision_set_this_tick` flag so `decision` and `decision_reason` cleanly return to `idle` as soon as a room stabilizes after `energy_balance_satisfied`, `off_peak_deferred`, or `overshoot_cutoff`.
+
+---
+
 ## [0.4.0] - 2026-11-25
 
 ### Breaking Changes

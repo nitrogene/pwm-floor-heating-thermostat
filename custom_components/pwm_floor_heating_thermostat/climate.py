@@ -2046,6 +2046,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         )
 
         if self._cur_temp is not None:
+            decision_set_this_tick = False
             in_recovery = (
                 self._window_recovery_until is not None and now_utc < self._window_recovery_until
             )
@@ -2067,12 +2068,14 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             # suspended during post-airing passive rebound)
             if error >= EMERGENCY_COMFORT_DEFICIT_OVERRIDE and not in_recovery:
                 should_heat = True
+                decision_set_this_tick = True
                 self._decision_key = DECISION_EMERGENCY_DEFICIT
                 self._decision_reason = (
                     f"Emergency comfort deficit bypass: curr {self._cur_temp}°C <= target {self._target_temp}°C - "
                     f"{EMERGENCY_COMFORT_DEFICIT_OVERRIDE}°C"
                 )
             elif off_peak_active:
+                decision_set_this_tick = True
                 hc_ceiling = self._target_temp + self._off_peak_comfort_margin
                 if self._cur_temp >= hc_ceiling or (
                     proj_val >= (hc_ceiling + 0.2) and self._cur_temp >= self._target_temp
@@ -2137,6 +2140,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     not in_recovery and error > self._rule_b_min_threshold
                 )
                 if trajectory_drop:
+                    decision_set_this_tick = True
                     comfort_override = error >= self._comfort_safety_deficit
                     near_hc = hours_until_next_hc <= max(0.5, self._effective_dead_time * 0.5)
                     if comfort_override or (net_energy_needed_kwh > 0.0 and not near_hc):
@@ -2163,11 +2167,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     f"Overshoot prevention cutoff: curr {self._cur_temp}°C, "
                     f"projected {round(proj_val, 2)}°C (target: {self._target_temp}°C)"
                 )
-            elif not should_heat and self._decision_key not in (
-                DECISION_OFF_PEAK_DEFERRED,
-                DECISION_ENERGY_BALANCE_SATISFIED,
-                DECISION_OVERSHOOT_CUTOFF,
-            ):
+            elif not should_heat and not decision_set_this_tick:
                 self._decision_key = DECISION_IDLE
                 self._decision_reason = (
                     f"Idle (stable trajectory: curr {self._cur_temp}°C, "
