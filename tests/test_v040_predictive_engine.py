@@ -447,3 +447,163 @@ def test_decision_key_resets_to_idle_when_room_stabilizes(base_config):
         assert "Idle (stable trajectory" in thermostat._decision_reason
 
     asyncio.run(_test())
+
+
+def test_peak_cycle_latch_prevents_energy_balance_abort_and_runs_to_peak_cap(base_config):
+    """[M-07] An active Peak-hour anticipated_drop cycle must not be aborted at t+1 min by rising E_transit."""
+
+    async def _test():
+        from custom_components.pwm_floor_heating_thermostat.const import (
+            DECISION_PEAK_CYCLE_CAP,
+            FSM_WAITING_MIN_OFF,
+        )
+
+        t0 = datetime(2026, 11, 26, 6, 58, 0, tzinfo=UTC)
+        t_next_hc = datetime(2026, 11, 26, 21, 6, 0, tzinfo=UTC)
+        hass = _mock_hass_states(
+            {
+                "weather.meteo_france": ("cloudy", {}),
+                "binary_sensor.heures_creuses_nuit": ("off", {"next_start": t_next_hc.isoformat()}),
+            }
+        )
+        forecasts = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 4.0}
+            for i in range(24)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.meteo_france": {"forecast": forecasts}}
+        )
+
+        thermostat = PwmFloorHeatingThermostat(hass, base_config)
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._target_temp = 19.0
+        thermostat._cur_temp = 18.5
+        thermostat._temp_projected = 18.3
+        thermostat._outdoor_temp = 4.0
+        thermostat._peak_max_run_duration = timedelta(minutes=45)
+
+        # Tick 1 (t0): meaningful deficit -> starts anticipated_drop and latches cycle start key
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+        assert thermostat._decision_key == DECISION_ANTICIPATED_DROP
+        assert thermostat._fsm_state == FSM_RUNNING_MIN_LOCK
+        assert thermostat._cycle_start_decision_key == DECISION_ANTICIPATED_DROP
+
+        # Tick 2 (t0 + 1 min): inject large E_transit so net_energy_needed_kwh == 0.0
+        # Latch must keep anticipated_drop active instead of flipping to energy_balance_satisfied
+        t1 = t0 + timedelta(minutes=1)
+        thermostat._slab_energy_pulses = [(t1, 6.0)]
+        with patch("homeassistant.util.dt.utcnow", return_value=t1):
+            await thermostat._async_control_heating(now=t1)
+        assert thermostat._planned_heating_hours == 0.0
+        assert thermostat._decision_key == DECISION_ANTICIPATED_DROP
+        assert thermostat._fsm_state == FSM_RUNNING_MIN_LOCK
+
+        # Tick 3 (t0 + 32 min): past Danfoss 30-min lock, still latched -> continues running toward 45-min cap
+        t32 = t0 + timedelta(minutes=32)
+        thermostat._slab_energy_pulses = [(t32, 6.0)]
+        with patch("homeassistant.util.dt.utcnow", return_value=t32):
+            await thermostat._async_control_heating(now=t32)
+        assert thermostat._decision_key == DECISION_ANTICIPATED_DROP
+        assert thermostat._fsm_state == FSM_RUNNING_NORMAL
+
+        # Tick 4 (t0 + 46 min): peak_max_run_duration (45 min) reached -> stops cleanly and clears latch
+        t46 = t0 + timedelta(minutes=46)
+        with patch("homeassistant.util.dt.utcnow", return_value=t46):
+            await thermostat._async_control_heating(now=t46)
+        assert thermostat._decision_key == DECISION_PEAK_CYCLE_CAP
+        assert thermostat._fsm_state == FSM_WAITING_MIN_OFF
+        assert thermostat._cycle_start_decision_key is None
+
+    asyncio.run(_test())
+
+
+def test_peak_hour_ignores_negligible_energy_deficit_below_rule_b_threshold(base_config):
+    """[M-07] Peak-hour entry requires delta_t_equiv >= rule_b_threshold (no startup on tiny kWh noise)."""
+
+    async def _test():
+        t0 = datetime(2026, 11, 26, 14, 0, 0, tzinfo=UTC)
+        t_next_hc = datetime(2026, 11, 26, 21, 6, 0, tzinfo=UTC)
+        hass = _mock_hass_states(
+            {
+                "weather.meteo_france": ("cloudy", {}),
+                "binary_sensor.heures_creuses_nuit": ("off", {"next_start": t_next_hc.isoformat()}),
+            }
+        )
+        forecasts = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 5.0}
+            for i in range(24)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.meteo_france": {"forecast": forecasts}}
+        )
+
+        thermostat = PwmFloorHeatingThermostat(hass, base_config)
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._target_temp = 19.0
+        thermostat._cur_temp = 18.6
+        thermostat._temp_projected = 18.3
+        thermostat._outdoor_temp = 5.0
+        thermostat._model_error_rms = 0.30  # rule_b_threshold = 0.60°C
+
+        # Set E_transit just 0.02 kWh below horizon need -> net_energy_needed_kwh > 0 but delta_t_equiv << 0.60°C
+        c_eff = thermostat._effective_thermal_capacity_kwh_k()
+        hourly_loss_kw = thermostat._effective_heat_loss * (19.0 - 5.0) / 1000.0
+        horizon_kwh = hourly_loss_kw * 7.1
+        room_excess_kwh = c_eff * (18.6 - 19.0)
+        e_transit_almost_full = max(0.0, horizon_kwh - room_excess_kwh - 0.02)
+        thermostat._slab_energy_pulses = [(t0, e_transit_almost_full)]
+
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+        assert thermostat._decision_key == DECISION_ENERGY_BALANCE_SATISFIED
+        assert thermostat._fsm_state == FSM_IDLE
+
+    asyncio.run(_test())
+
+
+def test_off_peak_cycle_not_latched_into_peak_when_balance_met(base_config):
+    """[M-07] A cycle started by off_peak_precharge must not stay latched into Peak hours once balance is met."""
+
+    async def _test():
+        from custom_components.pwm_floor_heating_thermostat.const import (
+            DECISION_OFF_PEAK_PRECHARGE,
+            FSM_WAITING_MIN_OFF,
+        )
+
+        t0 = datetime(2026, 11, 26, 5, 6, 0, tzinfo=UTC)
+        t_next_hc = datetime(2026, 11, 26, 21, 6, 0, tzinfo=UTC)
+        hass = _mock_hass_states(
+            {
+                "weather.meteo_france": ("cloudy", {}),
+                "binary_sensor.heures_creuses_nuit": ("off", {"next_start": t_next_hc.isoformat()}),
+            }
+        )
+        forecasts = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 5.0}
+            for i in range(24)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.meteo_france": {"forecast": forecasts}}
+        )
+
+        thermostat = PwmFloorHeatingThermostat(hass, base_config)
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._target_temp = 19.0
+        thermostat._cur_temp = 18.6
+        thermostat._temp_projected = 18.5
+        thermostat._outdoor_temp = 5.0
+        # Simulate HC precharge cycle already past 30-min lock with full slab energy in transit
+        thermostat._fsm_state = FSM_RUNNING_NORMAL
+        thermostat._cycle_start_time = t0 - timedelta(minutes=45)
+        thermostat._last_state_change = t0 - timedelta(minutes=45)
+        thermostat._cycle_start_decision_key = DECISION_OFF_PEAK_PRECHARGE
+        thermostat._slab_energy_pulses = [(t0, 6.0)]
+
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+        assert thermostat._decision_key == DECISION_ENERGY_BALANCE_SATISFIED
+        assert thermostat._fsm_state == FSM_WAITING_MIN_OFF
+        assert thermostat._cycle_start_decision_key is None
+
+    asyncio.run(_test())

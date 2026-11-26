@@ -522,6 +522,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._target_temp: float = DEFAULT_TARGET_TEMP
         self._hvac_mode = HVACMode.HEAT
         self._hvac_action = HVACAction.IDLE
+        self._cycle_start_decision_key: str | None = None
 
         # Finite State Machine (FSM)
         self._fsm_state = FSM_IDLE
@@ -602,6 +603,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         """Serialize internal histories, FSM lock state, and observer state for persistent storage."""
         return {
             "fsm_state": self._fsm_state,
+            "cycle_start_decision_key": self._cycle_start_decision_key,
             "last_state_change": self._last_state_change.isoformat() if self._last_state_change else None,
             "cycle_start_time": self._cycle_start_time.isoformat() if self._cycle_start_time else None,
             "cycles_today": self._cycles_today,
@@ -774,6 +776,9 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 except (ValueError, TypeError):
                     pass
 
+        stored_start_key = data.get("cycle_start_decision_key")
+        self._cycle_start_decision_key = stored_start_key if isinstance(stored_start_key, str) else None
+
         stored_fsm = data.get("fsm_state")
         if stored_fsm in [FSM_IDLE, FSM_WAITING_MIN_OFF, FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
             self._reconcile_restored_fsm(stored_fsm, now)
@@ -809,6 +814,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 self._fsm_state = FSM_WAITING_MIN_OFF
                 self._last_state_change = now
                 self._cycle_start_time = None
+                self._cycle_start_decision_key = None
                 self._hvac_action = HVACAction.IDLE
                 self._simulated_heater_state = False
                 _LOGGER.warning(
@@ -2135,7 +2141,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                             f"target start {target_start.astimezone().strftime('%H:%M')})"
                         )
             else:
-                # Peak hours: strict top-up only if trajectory drops AND deficit predicted before next HC
+                # Peak hours: strict top-up only if trajectory drops AND meaningful deficit predicted before next HC
                 trajectory_drop = projected_error > rule_b_threshold or (
                     not in_recovery and error > self._rule_b_min_threshold
                 )
@@ -2143,20 +2149,31 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     decision_set_this_tick = True
                     comfort_override = error >= self._comfort_safety_deficit
                     near_hc = hours_until_next_hc <= max(0.5, self._effective_dead_time * 0.5)
-                    if comfort_override or (net_energy_needed_kwh > 0.0 and not near_hc):
+                    is_running = self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
+                    # Latch active Peak-hour top-up cycles so rising E_transit during the run
+                    # never aborts the cycle at t+1 min (preventing 30-min micro-cycles).
+                    peak_cycle_latched = (
+                        is_running and self._cycle_start_decision_key == DECISION_ANTICIPATED_DROP
+                    )
+                    # Convert net energy deficit to equivalent temperature drop (°C) to unify entry
+                    # gating in °C and avoid starting a compressor for negligible modeled noise.
+                    delta_t_equiv = (net_energy_needed_kwh / c_eff) if c_eff > 0.0 else 0.0
+                    has_meaningful_deficit = delta_t_equiv >= rule_b_threshold
+                    if comfort_override or peak_cycle_latched or (has_meaningful_deficit and not near_hc):
                         should_heat = True
                         self._decision_key = DECISION_ANTICIPATED_DROP
                         self._decision_reason = (
                             f"Peak-hour strict top-up: projected {round(proj_val, 2)}°C in {self._dead_time}h "
                             f"(slope: {round(self._derivative_smooth, 3)}°C/h, threshold: {rule_b_threshold}°C, "
-                            f"deficit before HC: {round(net_energy_needed_kwh, 2)} kWh)"
+                            f"deficit before HC: {round(net_energy_needed_kwh, 2)} kWh / {round(delta_t_equiv, 2)}°C)"
                         )
                     else:
                         should_heat = False
                         self._decision_key = DECISION_ENERGY_BALANCE_SATISFIED
                         self._decision_reason = (
                             f"Peak-hour cycle skipped: energy balance met before next HC "
-                            f"(in-transit {round(e_transit, 2)} kWh, {round(hours_until_next_hc, 1)}h to HC)"
+                            f"(in-transit {round(e_transit, 2)} kWh, deficit {round(delta_t_equiv, 2)}°C < "
+                            f"{rule_b_threshold}°C, {round(hours_until_next_hc, 1)}h to HC)"
                         )
 
             # Rule C: Surface and ambient overshoot protection (+0.6°C real or projected > target + 0.8°C)
@@ -2669,6 +2686,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
+        self._cycle_start_decision_key = self._decision_key
         self._last_energy_tick_ts = now
         self._heating_start_derivative = self._derivative_smooth
         self._hvac_action = HVACAction.HEATING
@@ -2769,6 +2787,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         self._fsm_state = FSM_WAITING_MIN_OFF
         self._last_state_change = now
+        self._cycle_start_decision_key = None
         self._hvac_action = HVACAction.IDLE
         self._schedule_state_save()
         self._thermal_runaway_start_time = None

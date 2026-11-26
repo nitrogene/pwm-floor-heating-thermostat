@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.2] - 2026-11-26
+
+### Fixed
+- **Peak-Hour Micro-Cycling (`M-07` — Cycle Latch & Equivalent-°C Entry Gate)**:
+  - Latched active Peak-hour `anticipated_drop` cycles (`_cycle_start_decision_key`, persisted across restarts in `Store`) so rising `slab_energy_in_transit_kwh` during a run no longer triggers `energy_balance_satisfied` at `t + 1 min` and truncates recovery cycles to `min_cycle_duration` (30 min).
+  - Converted Peak-hour entry gating to equivalent room temperature drop (`delta_t_equiv = net_energy_needed_kwh / c_eff >= rule_b_threshold`) so negligible modeled kWh noise no longer starts a compressor, while preserving clean HC-to-HP handoffs and end-of-off-peak scheduling.
+
+---
+
 ## [0.4.1] - 2026-11-25
 
 ### Fixed
