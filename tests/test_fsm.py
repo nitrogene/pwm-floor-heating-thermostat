@@ -142,44 +142,45 @@ def test_f04_safety_guards_active_when_outdoor_sensor_unavailable():
 
 
 def test_f07_mode_a_restricted_to_night_and_throttled():
-    """[F-07] Mode A only samples at night (23:00-06:00) and at most 1 sample per hour."""
+    """[F-07 / v0.4.3] Rolling 24h energy-balance Mode A requires >=20h span and throttles to 1 sample/hour."""
     async def _test():
         t = _create_real_fsm_thermostat()
-        t._cur_temp = 20.0
-        t._filtered_temp = 20.0
-        t._outdoor_temp = 16.0
-        t._derivative_smooth = -0.15
-        t._last_state_change = datetime(2026, 11, 13, 18, 0, 0, tzinfo=UTC)
+        t._cur_temp = 19.0
+        t._filtered_temp = 19.0
+        t._outdoor_temp = 5.0
 
-        # 1. Daytime (14:00 local) -> 0 samples collected
-        t_day = datetime(2026, 11, 14, 14, 0, 0, tzinfo=UTC)
-        t._observer_last_update = t_day
+        # 1. Insufficient history (< 20h span) -> 0 samples collected
+        t_short = datetime(2026, 11, 14, 14, 0, 0, tzinfo=UTC)
+        t._observer_last_update = t_short
         with (
-            patch("homeassistant.util.dt.utcnow", return_value=t_day),
-            patch("homeassistant.util.dt.now", return_value=t_day),
+            patch("homeassistant.util.dt.utcnow", return_value=t_short),
+            patch("homeassistant.util.dt.now", return_value=t_short),
         ):
-            await t._async_control_heating(now=t_day)
+            await t._async_control_heating(now=t_short)
         assert t._heat_loss_samples_count == 0
 
-        # 2. Nighttime (02:00 local) -> 1 sample collected, second call 1 min later is throttled
-        t_night = datetime(2026, 11, 15, 2, 0, 0, tzinfo=UTC)
-        t._observer_last_update = t_night
-        t._derivative_smooth = -0.15
+        # 2. Full 24h rolling window with injected energy -> 1 sample collected, next call 1 min later throttled
+        t_full = datetime(2026, 11, 15, 2, 0, 0, tzinfo=UTC)
+        t._energy_balance_history = [
+            (t_full - timedelta(hours=24 - i), (24.0 * i) / 24.0, 19.0, 5.0)
+            for i in range(24)
+        ]
+        t._cumulative_injected_kwh = 24.0
+        t._observer_last_update = t_full
         with (
-            patch("homeassistant.util.dt.utcnow", return_value=t_night),
-            patch("homeassistant.util.dt.now", return_value=t_night),
+            patch("homeassistant.util.dt.utcnow", return_value=t_full),
+            patch("homeassistant.util.dt.now", return_value=t_full),
         ):
-            await t._async_control_heating(now=t_night)
+            await t._async_control_heating(now=t_full)
         assert t._heat_loss_samples_count == 1
 
-        t_night_1m = t_night + timedelta(minutes=1)
-        t._observer_last_update = t_night_1m
-        t._derivative_smooth = -0.15
+        t_full_1m = t_full + timedelta(minutes=1)
+        t._observer_last_update = t_full_1m
         with (
-            patch("homeassistant.util.dt.utcnow", return_value=t_night_1m),
-            patch("homeassistant.util.dt.now", return_value=t_night_1m),
+            patch("homeassistant.util.dt.utcnow", return_value=t_full_1m),
+            patch("homeassistant.util.dt.now", return_value=t_full_1m),
         ):
-            await t._async_control_heating(now=t_night_1m)
+            await t._async_control_heating(now=t_full_1m)
         assert t._heat_loss_samples_count == 1  # Throttled (1 sample/hour max)
 
     asyncio.run(_test())

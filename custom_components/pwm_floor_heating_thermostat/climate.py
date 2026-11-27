@@ -476,9 +476,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._window_open = False
         self._window_open_time: datetime | None = None
 
-        # Continuous passive calibration of heat loss H (Mode A)
+        # Non-circular 24h rolling energy-balance calibration of heat loss H (Mode A)
         self._heat_loss_measured_wk: float | None = None
         self._heat_loss_samples_count: int = 0
+        self._cumulative_injected_kwh: float = 0.0
+        self._energy_balance_history: list[tuple[datetime, float, float, float]] = []
 
         # Mode B soft self-adaptation of heat loss H
         self._auto_calibrate_heat_loss = bool(
@@ -509,6 +511,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         self._dead_time_measured_hours: float | None = None
         self._dead_time_samples_count: int = 0
         self._heating_start_derivative: float | None = None
+        self._last_stop_time: datetime | None = None
+        self._cycle_started_from_rest: bool = False
 
         # Temperature presets
         self._eco_temp = float(config.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP))
@@ -623,8 +627,15 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
             ),
             "heat_loss_samples_count": self._heat_loss_samples_count,
             "heat_loss_measured_wk": self._heat_loss_measured_wk,
+            "cumulative_injected_kwh": round(self._cumulative_injected_kwh, 4),
+            "energy_balance_history": [
+                [t.isoformat(), round(e, 4), round(ti, 2), round(to, 2)]
+                for t, e, ti, to in self._energy_balance_history[-28:]
+            ],
             "dead_time_samples_count": self._dead_time_samples_count,
             "dead_time_measured_hours": self._dead_time_measured_hours,
+            "last_stop_time": self._last_stop_time.isoformat() if self._last_stop_time else None,
+            "cycle_started_from_rest": self._cycle_started_from_rest,
             # v0.4.0 zero-impact restart persistence
             "slab_energy_pulses": [[t.isoformat(), round(kwh, 5)] for t, kwh in self._slab_energy_pulses],
             "last_energy_tick_ts": (
@@ -778,6 +789,29 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         stored_start_key = data.get("cycle_start_decision_key")
         self._cycle_start_decision_key = stored_start_key if isinstance(stored_start_key, str) else None
+
+        if data.get("cumulative_injected_kwh") is not None:
+            try:
+                self._cumulative_injected_kwh = max(0.0, float(data["cumulative_injected_kwh"]))
+            except (ValueError, TypeError):
+                pass
+        if isinstance(data.get("energy_balance_history"), list):
+            restored_eb: list[tuple[datetime, float, float, float]] = []
+            for item in data["energy_balance_history"]:
+                if isinstance(item, list) and len(item) == 4:
+                    ts = dt_util.parse_datetime(str(item[0]))
+                    if ts is not None:
+                        try:
+                            restored_eb.append((ts, float(item[1]), float(item[2]), float(item[3])))
+                        except (ValueError, TypeError):
+                            pass
+            self._energy_balance_history = restored_eb[-28:]
+        if data.get("last_stop_time"):
+            parsed_stop = dt_util.parse_datetime(str(data["last_stop_time"]))
+            if parsed_stop is not None:
+                self._last_stop_time = parsed_stop
+        if "cycle_started_from_rest" in data:
+            self._cycle_started_from_rest = bool(data["cycle_started_from_rest"])
 
         stored_fsm = data.get("fsm_state")
         if stored_fsm in [FSM_IDLE, FSM_WAITING_MIN_OFF, FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]:
@@ -1368,18 +1402,6 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         return True
 
     @callback
-    def _async_quota_sensor_changed(self, event) -> None:
-        """Immediate reaction to daily quota enforcement switch toggle."""
-        new_state = event.data.get("new_state")
-        if new_state is not None:
-            _LOGGER.debug(
-                "Daily quota enforcement switch %s toggled to %s",
-                self._enforce_daily_quota_sensor,
-                new_state.state,
-            )
-            self.hass.async_create_task(self._async_control_heating())
-
-    @callback
     def _async_window_detection_sensor_changed(self, event) -> None:
         """Immediate reaction to window detection master switch toggle."""
         new_state = event.data.get("new_state")
@@ -1523,6 +1545,7 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                 kwh = (self._power_watts / 1000.0) * dt_hours
                 if kwh > 0.0:
                     self._slab_energy_pulses.append((now_utc, kwh))
+                    self._cumulative_injected_kwh += kwh
             self._last_energy_tick_ts = now_utc
         else:
             self._last_energy_tick_ts = None
@@ -1783,8 +1806,29 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         else:
             effective_deriv = self._derivative_smooth
 
-        # Projected trajectory at t + theta (computed from filtered temperature & smoothed derivative)
-        self._temp_projected = self._filtered_temp + (self._effective_dead_time * effective_deriv)
+        # Projected trajectory at t + theta (computed from filtered temperature & smoothed derivative),
+        # enriched with net slab energy already in transit when the heat wave has not yet accelerated dT/dt.
+        transit_boost = 0.0
+        if (
+            not self._window_open
+            and not in_recovery
+            and self._slab_energy_in_transit_kwh > 0.0
+            and effective_deriv <= 0.05
+        ):
+            c_eff = self._effective_thermal_capacity_kwh_k()
+            e_loss_theta = 0.0
+            if self._outdoor_temp is not None and not self._outdoor_sensor_stale:
+                e_loss_theta = (
+                    self._effective_heat_loss
+                    * self._wind_factor
+                    * max(0.0, self._filtered_temp - self._outdoor_temp)
+                    * self._effective_dead_time
+                ) / 1000.0
+            net_transit_kwh = max(0.0, self._slab_energy_in_transit_kwh - e_loss_theta)
+            transit_boost = min(0.5, net_transit_kwh / c_eff) if c_eff > 0.0 else 0.0
+        self._temp_projected = (
+            self._filtered_temp + (self._effective_dead_time * effective_deriv) + transit_boost
+        )
 
         # Record projection for continuous model error evaluation
         self._projection_history.append((now, self._temp_projected))
@@ -2319,48 +2363,67 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
         else:
             await self._async_stop_heating_safe()
 
-        # 8. Passive continuous calibration of heat loss factor (Mode A - Night-time cooling only, F-07)
-        local_hour = dt_util.now().hour
-        is_night_window = local_hour >= 23 or local_hour < 6
-        sample_throttled = (
-            self._last_heat_loss_sample_ts is not None
-            and (now_utc - self._last_heat_loss_sample_ts).total_seconds() < 3600.0
-        )
+        # 8. Non-circular 24h rolling energy-balance calibration of heat loss factor H (W/K)
         if (
-            is_night_window
-            and not sample_throttled
-            and self._solar_credit_kwh == 0.0
-            and self._fsm_state in [FSM_IDLE, FSM_WAITING_MIN_OFF]
-            and not self._window_open
+            not self._window_open
             and self._cur_temp is not None
             and self._outdoor_temp is not None
+            and not self._outdoor_sensor_stale
         ):
-            time_since_stop = (now_utc - self._last_state_change).total_seconds()
-            required_rest = 2.0 * self._dead_time * 3600.0  # Relaxed slab (> 2 * theta)
-            delta_t = self._cur_temp - self._outdoor_temp
+            eb_cutoff = now_utc - timedelta(hours=26)
+            self._energy_balance_history = [
+                entry for entry in self._energy_balance_history if entry[0] >= eb_cutoff
+            ]
+            if (
+                not self._energy_balance_history
+                or (now_utc - self._energy_balance_history[-1][0]).total_seconds() >= 3600.0
+            ):
+                self._energy_balance_history.append(
+                    (
+                        now_utc,
+                        round(self._cumulative_injected_kwh, 4),
+                        float(self._cur_temp),
+                        float(self._outdoor_temp),
+                    )
+                )
 
-            if time_since_stop >= required_rest and delta_t >= 3.0 and self._derivative_smooth < -0.05:
-                # C_eff = slab_tau_hours * heat_loss_wk (in Wh/K)
-                c_eff = self._slab_tau * self._heat_loss
-                p_loss = -c_eff * self._derivative_smooth  # Watts
-                sample_ua = p_loss / delta_t
-
-                # Disturbance filter: sample within [0.3 * H, 3.0 * H]
-                if 0.3 * self._heat_loss <= sample_ua <= 3.0 * self._heat_loss:
-                    if self._heat_loss_measured_wk is None:
-                        self._heat_loss_measured_wk = round(sample_ua, 1)
-                    else:
-                        self._heat_loss_measured_wk = round(
-                            0.98 * self._heat_loss_measured_wk + 0.02 * sample_ua, 1
-                        )
-                    self._heat_loss_samples_count += 1
-                    self._last_heat_loss_sample_ts = now_utc
-                    self._schedule_state_save()
+            sample_throttled = (
+                self._last_heat_loss_sample_ts is not None
+                and (now_utc - self._last_heat_loss_sample_ts).total_seconds() < 3600.0
+            )
+            if not sample_throttled and len(self._energy_balance_history) >= 20:
+                oldest_ts, oldest_kwh, oldest_tin, _ = self._energy_balance_history[0]
+                newest_ts, newest_kwh, newest_tin, _ = self._energy_balance_history[-1]
+                dt_span_h = (newest_ts - oldest_ts).total_seconds() / 3600.0
+                if dt_span_h >= 20.0:
+                    e_injected_kwh = max(0.0, newest_kwh - oldest_kwh)
+                    avg_delta_t = sum(
+                        ti - to for _, _, ti, to in self._energy_balance_history
+                    ) / len(self._energy_balance_history)
+                    if e_injected_kwh > 0.0 and avg_delta_t >= 5.0:
+                        c_eff_kwh_k = self._effective_thermal_capacity_kwh_k()
+                        delta_t_room = newest_tin - oldest_tin
+                        net_loss_kwh = e_injected_kwh - (c_eff_kwh_k * delta_t_room)
+                        if net_loss_kwh > 0.0:
+                            sample_ua = (net_loss_kwh * 1000.0) / (dt_span_h * avg_delta_t)
+                            if MIN_HEAT_LOSS_WK <= sample_ua <= 500.0:
+                                if self._heat_loss_measured_wk is None:
+                                    self._heat_loss_measured_wk = round(sample_ua, 1)
+                                else:
+                                    self._heat_loss_measured_wk = round(
+                                        0.85 * self._heat_loss_measured_wk + 0.15 * sample_ua, 1
+                                    )
+                                self._heat_loss_samples_count += 1
+                                self._last_heat_loss_sample_ts = now_utc
+                                self._schedule_state_save()
 
         # 9. Experimental identification of slab transport dead time theta (inflection point)
+        # Only accept samples from cycles started after a relaxed slab (>= 2 * theta rest) with no solar gain.
         if (
             self._fsm_state in [FSM_RUNNING_MIN_LOCK, FSM_RUNNING_NORMAL]
             and self._cycle_start_time
+            and self._cycle_started_from_rest
+            and self._solar_credit_kwh == 0.0
             and self._heating_start_derivative is not None
             and self._heating_start_derivative <= 0.0
         ):
@@ -2683,6 +2746,11 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
                     _LOGGER.error("Failed to turn on heater entity %s: %s", self._heater_entity, err)
                     return
 
+        required_rest_sec = 2.0 * self._dead_time * 3600.0
+        self._cycle_started_from_rest = (
+            self._last_stop_time is None
+            or (now - self._last_stop_time).total_seconds() >= required_rest_sec
+        )
         self._fsm_state = FSM_RUNNING_MIN_LOCK
         self._last_state_change = now
         self._cycle_start_time = now
@@ -2787,6 +2855,8 @@ class PwmFloorHeatingThermostat(ClimateEntity, RestoreEntity):
 
         self._fsm_state = FSM_WAITING_MIN_OFF
         self._last_state_change = now
+        self._last_stop_time = now
+        self._cycle_started_from_rest = False
         self._cycle_start_decision_key = None
         self._hvac_action = HVACAction.IDLE
         self._schedule_state_save()

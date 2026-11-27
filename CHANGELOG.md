@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.3] - 2026-11-27
+
+### Fixed
+- **Non-Circular 24h Energy-Balance Heat-Loss Calibration (Mode A)**: Replaced the passive night-cooling formula (`sample_ua = -tau * H_config * dT/dt / delta_T`, which was circular in `H_config` and drove `H` downward on heavy slabs) with a rolling 24h energy balance (`H = (E_injected - C_eff * delta_T_room) / (dt_span * avg_delta_T)`), persisted across restarts in `Store`.
+- **Unified Thermal Capacity (`C_eff`)**: Eliminated the discrepancy between `_effective_thermal_capacity_kwh_k()` and Mode A calibration so all energy calculations share a single thermal capacity source.
+- **Relaxed-Slab Guard for Dead-Time Identification (Mode B)**: Dead-time (`theta`) inflection samples are now accepted only for cycles started after at least `2 * dead_time` of rest with zero solar credit, eliminating downward bias from back-to-back cycles.
+- **Dead Code Cleanup**: Removed obsolete v0.3.x `_async_quota_sensor_changed` callback referencing removed `_enforce_daily_quota_sensor`.
+
+### Changed
+- **Slab In-Transit Energy in Projected Temperature**: `_update_trajectory_projection()` now incorporates bounded net `slab_energy_in_transit_kwh / C_eff` (capped at `+0.5°C`) while `dT/dt <= 0.05°C/h` so `temp_projected_ahead` reflects heat already propagating through the slab before room temperature accelerates.
+
+---
+
 ## [0.4.2] - 2026-11-26
 
 ### Fixed

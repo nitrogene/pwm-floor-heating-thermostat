@@ -607,3 +607,138 @@ def test_off_peak_cycle_not_latched_into_peak_when_balance_met(base_config):
         assert thermostat._cycle_start_decision_key is None
 
     asyncio.run(_test())
+
+
+def test_non_circular_24h_energy_balance_heat_loss_calibration(base_config):
+    """[v0.4.3] Rolling 24h energy-balance calibration measures true H (W/K) independent of initial H."""
+
+    async def _test():
+        t0 = datetime(2026, 11, 27, 8, 0, 0, tzinfo=UTC)
+        hass = _mock_hass_states(
+            {
+                "weather.meteo_france": ("cloudy", {}),
+                "binary_sensor.heures_creuses_nuit": ("off", {}),
+            }
+        )
+        forecasts = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 4.7}
+            for i in range(24)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.meteo_france": {"forecast": forecasts}}
+        )
+
+        cfg = dict(base_config)
+        cfg["heat_loss_wk"] = 13.1  # Intentionally underestimated initial H
+        cfg["power_watts"] = 6500.0
+        cfg["auto_calibrate_heat_loss"] = False
+
+        thermostat = PwmFloorHeatingThermostat(hass, cfg)
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._target_temp = 19.0
+        thermostat._cur_temp = 18.8
+        thermostat._outdoor_temp = 4.7
+
+        # Populate 23 hourly snapshots over 23h with 40.82 kWh injected (~6.28h at 6.5 kW) at ΔT = 14.1 K
+        thermostat._energy_balance_history = [
+            (t0 - timedelta(hours=24 - i), (40.82 * i) / 24.0, 18.8, 4.7)
+            for i in range(24)
+        ]
+        thermostat._cumulative_injected_kwh = 40.82
+
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+
+        # True H = 40820 Wh / (24h * 14.1 K) = 120.6 W/K (completely independent of configured 13.1 W/K!)
+        assert thermostat._heat_loss_measured_wk is not None
+        assert 115.0 <= thermostat._heat_loss_measured_wk <= 126.0
+        assert thermostat._heat_loss_samples_count == 1
+        # Because auto_calibrate_heat_loss is False, effective H stays strictly at configured baseline
+        assert thermostat._effective_heat_loss == 13.1
+
+    asyncio.run(_test())
+
+
+def test_temp_projected_includes_slab_energy_in_transit_when_cooling(base_config):
+    """[v0.4.3] T_projected reflects net slab energy in transit when heat wave has not yet accelerated dT/dt."""
+    t0 = datetime(2026, 11, 27, 8, 0, 0, tzinfo=UTC)
+    hass = _mock_hass_states({})
+    thermostat = PwmFloorHeatingThermostat(hass, base_config)
+    thermostat._cur_temp = 18.8
+    thermostat._filtered_temp = 18.8
+    thermostat._outdoor_temp = 3.0
+    thermostat._temp_derivative = -0.04
+    thermostat._derivative_smooth = -0.04
+    thermostat._observer_last_update = t0 - timedelta(minutes=5)
+
+    # Without E_transit: pure linear extrapolation (~18.72°C)
+    thermostat._slab_energy_in_transit_kwh = 0.0
+    thermostat._update_trajectory_projection(t0)
+    proj_without = thermostat._temp_projected
+
+    # With 2.0 kWh in transit: net transit boost lifts T_projected (bounded <= +0.5°C)
+    thermostat._slab_energy_in_transit_kwh = 2.0
+    thermostat._observer_last_update = t0
+    thermostat._update_trajectory_projection(t0 + timedelta(minutes=1))
+    proj_with = thermostat._temp_projected
+
+    assert proj_with > proj_without
+    assert (proj_with - proj_without) <= 0.55
+
+
+def test_dead_time_calibration_requires_relaxed_slab_rest(base_config):
+    """[v0.4.3] Dead-time inflection samples are rejected after back-to-back cycles and accepted after rest."""
+
+    async def _test():
+        t0 = datetime(2026, 11, 27, 2, 0, 0, tzinfo=UTC)
+        hass = _mock_hass_states(
+            {
+                "weather.meteo_france": ("cloudy", {}),
+                "binary_sensor.heures_creuses_nuit": ("on", {}),
+            }
+        )
+        forecasts = [
+            {"datetime": (t0 + timedelta(hours=i)).isoformat(), "temperature": 3.0}
+            for i in range(24)
+        ]
+        hass.services.async_call = AsyncMock(
+            return_value={"weather.meteo_france": {"forecast": forecasts}}
+        )
+
+        thermostat = PwmFloorHeatingThermostat(hass, base_config)
+        thermostat._hvac_mode = HVACMode.HEAT
+        thermostat._target_temp = 19.0
+        thermostat._cur_temp = 18.6
+        thermostat._outdoor_temp = 3.0
+
+        # 1. Back-to-back cycle (not started from rest) -> inflection ignored
+        thermostat._fsm_state = FSM_RUNNING_NORMAL
+        thermostat._cycle_start_time = t0 - timedelta(hours=1.2)
+        thermostat._last_state_change = t0 - timedelta(hours=1.2)
+        thermostat._cycle_started_from_rest = False
+        thermostat._heating_start_derivative = -0.05
+        thermostat._filtered_temp = 18.6
+        thermostat._temp_derivative = 0.08
+        thermostat._derivative_smooth = 0.08
+        thermostat._observer_last_update = t0 - timedelta(seconds=30)
+
+        with patch("homeassistant.util.dt.utcnow", return_value=t0):
+            await thermostat._async_control_heating(now=t0)
+        assert thermostat._dead_time_measured_hours is None
+        assert thermostat._dead_time_samples_count == 0
+
+        # 2. Cycle started after relaxed slab (>= 2 * theta rest) -> inflection accepted (~1.2h)
+        thermostat._cycle_started_from_rest = True
+        thermostat._heating_start_derivative = -0.05
+        thermostat._temp_derivative = 0.08
+        thermostat._derivative_smooth = 0.08
+        thermostat._observer_last_update = t0
+
+        t1 = t0 + timedelta(seconds=30)
+        with patch("homeassistant.util.dt.utcnow", return_value=t1):
+            await thermostat._async_control_heating(now=t1)
+        assert thermostat._dead_time_measured_hours is not None
+        assert 1.1 <= thermostat._dead_time_measured_hours <= 1.3
+        assert thermostat._dead_time_samples_count == 1
+
+    asyncio.run(_test())

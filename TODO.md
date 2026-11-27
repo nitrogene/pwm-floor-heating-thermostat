@@ -5,6 +5,15 @@ All items are strictly ordered from **most critical to least critical**.
 
 ---
 
+## v0.4.3 — Non-Circular Heat-Loss Calibration, Unified `C_eff`, `E_transit` Projection & Dead-Time Rest Guard
+
+- [x] **[CORE - M-08] Non-Circular 24h Rolling Energy-Balance Calibration for `H` (`climate.py`, `Store`, `tests/`) :**
+  - Replace circular passive-cooling Mode A with rolling 24h energy balance using persisted `_cumulative_injected_kwh` and `_energy_balance_history`.
+  - Unify `C_eff` across all calculations via `_effective_thermal_capacity_kwh_k()`.
+  - Enrich `temp_projected_ahead` with bounded net `slab_energy_in_transit_kwh / C_eff` (`<= +0.5°C`) when `dT/dt <= 0.05°C/h`.
+  - Require relaxed slab rest (`>= 2 * dead_time`) and zero solar credit before accepting `dead_time_measured_hours` inflection samples.
+  - Remove dead `_async_quota_sensor_changed` callback.
+
 ## Next — Peak-Hour Cycle Latch & Unified °C Entry Gate (Eliminate `energy_balance_satisfied` vs `anticipated_drop` Micro-Cycling)
 
 - [x] **[CORE - M-07] Peak-Hour Cycle Latch & Equivalent-°C Entry Gate (`climate.py`, `tests/`) :**
